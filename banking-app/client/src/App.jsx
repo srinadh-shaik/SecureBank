@@ -1,16 +1,13 @@
-import Index from "./pages/Index.jsx";
-import NotFound from "./pages/NotFound";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import React from 'react';
+import { NetworkProvider } from './contexts/NetworkContext';
+import Dashboard from './components/Dashboard';
 
-function App() {
+const App = () => {
   return (
-    <BrowserRouter>
-    <Routes>
-      <Route path = "/" element = {<Index/>}/>
-      <Route path = "*" element = {<NotFound/>}/>
-    </Routes>
-      </BrowserRouter>
-  )
-}
+    <NetworkProvider>
+      <Dashboard />
+    </NetworkProvider>
+  );
+};
 
-export default App
+export default App;
