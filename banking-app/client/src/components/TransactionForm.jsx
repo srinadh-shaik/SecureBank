@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Send, AlertTriangle, Search } from 'lucide-react';
+import { X, Send, AlertTriangle, Search, RefreshCw, CheckCircle} from 'lucide-react';
 import { useNetwork } from '../contexts/NetworkContext';
 import { apiService } from '../services/api';
 
@@ -61,6 +61,21 @@ const TransactionForm = ({ onSubmit, onCancel, userBankAccounts }) => {
     setSuccess('');
     setIsSubmitting(true);
 
+    const parsedAmount = parseFloat(formData.amount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      setError('Please enter a valid positive amount.');
+      setIsSubmitting(false);
+      return;
+    }
+
+    // Create a new formData object with the parsed amount
+    const transactionDataToSend = {
+      ...formData,
+      amount: parsedAmount,
+    };
+
+    console.log('TransactionForm: Submitting transaction...', formData);
+
     if (!recipientDetails && networkStatus.isOnline) {
       setError('Please look up and confirm recipient details first.');
       setIsSubmitting(false);
@@ -74,9 +89,17 @@ const TransactionForm = ({ onSubmit, onCancel, userBankAccounts }) => {
 
     try {
       // Pass the full transaction data, fromBankAccountId, and senderPin
-      await onSubmit(formData, formData.fromBankAccountId, formData.senderPin);
+      await onSubmit(transactionDataToSend, formData.fromBankAccountId, formData.senderPin);
+      console.log('TransactionForm: Transaction submitted successfully');
       setSuccess('Transaction initiated successfully!');
+      
+      // Close form after a brief delay to show success message
+      setTimeout(() => {
+        console.log('TransactionForm: Auto-closing form after success');
+        onCancel(); // This will close the form
+      }, 1500);
     } catch (err) {
+      console.error('TransactionForm: Transaction submission failed:', err);
       setError(err.message || 'Transaction failed');
     } finally {
       setIsSubmitting(false);
@@ -166,7 +189,7 @@ const TransactionForm = ({ onSubmit, onCancel, userBankAccounts }) => {
               value={formData.toIfscCode}
               onChange={handleInputChange}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-              placeholder="Enter IFSC code"
+              placeholder="e.g., SBIN0001234"
               required
             />
           </div>

@@ -1,13 +1,15 @@
 import axios from 'axios';
 import { localDB } from './database';
 
-// const API_BASE_URL = 'http://localhost:8000';
-const API_BASE_URL = 'http://localhost:3001/api';
+const API_BASE_URL = 'http://localhost:8000';
+
 
 class ApiService {
   api;
   isOnline = navigator.onLine;
+  isServerHealthy = false; // Initialize server health status
   healthCheckInterval = null;
+  token = null;
 
   constructor() {
     this.api = axios.create({
@@ -15,12 +17,34 @@ class ApiService {
       timeout: 10000,
     });
 
-    // For this demo, we don't need to manage JWT tokens on the client side
-    // because the backend's authenticateToken middleware always assigns the demo user.
-    // However, if you re-introduce proper authentication, you'd re-enable token handling here.
+    // Load token from local storage on init
+    this.token = localStorage.getItem('auth_token');
+    if (this.token) {
+      this.api.defaults.headers.common['Authorization'] = `Bearer ${this.token}`;
+    }
+    if (this.isOnline) { // Perform initial health check if online
+      this.healthCheck();
+    }
 
     // Initialize network monitoring
     this.initializeNetworkMonitoring();
+
+    // Intercept requests to add auth token
+    this.api.interceptors.request.use(
+      (config) => {
+        if (this.token) {
+          config.headers['Authorization'] = `Bearer ${this.token}`;
+        }
+        if (!this.isOnline) { // Block requests if offline
+          console.warn('API: Request blocked due to offline status:', config.url);
+          return Promise.reject(new Error('Network offline. Request blocked.'));
+        }
+        return config;
+      },
+      (error) => {
+        return Promise.reject(error);
+      }
+    );
   }
 
   initializeNetworkMonitoring() {
@@ -48,14 +72,8 @@ class ApiService {
     this.stopHealthCheck(); // Clear any existing interval
     this.healthCheckInterval = setInterval(async () => {
       const isHealthy = await this.healthCheck();
-      if (!isHealthy && this.isOnline) {
-        this.isOnline = false;
-        window.dispatchEvent(new CustomEvent('networkStatusChanged', { detail: { isOnline: false } }));
-      } else if (isHealthy && !this.isOnline) {
-        this.isOnline = true;
-        window.dispatchEvent(new CustomEvent('networkStatusChanged', { detail: { isOnline: true } }));
-        this.syncOfflineTransactions();
-      }
+      // Dispatch an event indicating server health, separate from network connectivity
+      window.dispatchEvent(new CustomEvent('serverHealthChanged', { detail: { isHealthy: isHealthy } }));
     }, 15000); // Check every 15 seconds
   }
 
@@ -66,10 +84,50 @@ class ApiService {
     }
   }
 
-  // No token management needed for this demo setup
+  setToken(token) {
+    this.token = token;
+    localStorage.setItem('auth_token', token);
+    this.api.defaults.headers.common['Authorization'] = `Bearer ${this.token}`;
+  }
+
+  getToken() {
+    return this.token;
+  }
+
   logout() {
+    this.token = null;
+    localStorage.removeItem('auth_token');
     localStorage.removeItem('user_data'); // Clear cached user data
-    // No token to clear from axios headers
+    delete this.api.defaults.headers.common['Authorization'];
+    this.stopHealthCheck();
+    
+    // Clear sync queue on logout to prevent cross-user contamination
+    localDB.clearSyncQueue().catch(err => console.error('Failed to clear sync queue on logout:', err));
+  }
+
+  async requestOtp(phoneNumber) {
+    try {
+      const response = await this.api.post('/auth/request-otp', { phoneNumber });
+      return response.data;
+    } catch (error) {
+      throw new Error(error.response?.data?.error || 'Failed to request OTP');
+    }
+  }
+
+  async verifyOtp(phoneNumber, otp) {
+    try {
+      const response = await this.api.post('/auth/verify-otp', { phoneNumber, otp });
+      const { token, user, message } = response.data;
+      this.setToken(token);
+      
+      // Clear any existing sync queue from previous users
+      await localDB.clearSyncQueue();
+      
+      await localDB.saveUserData('user', user); // Cache user data locally
+      return { user, message };
+    } catch (error) {
+      throw new Error(error.response?.data?.error || 'OTP verification failed');
+    }
   }
 
   async getAccountDetails() {
@@ -130,53 +188,56 @@ class ApiService {
       toIfscCode: transactionData.toIfscCode,
       toBranch: transactionData.toBranch,
       amount: transactionData.amount,
-      type: transactionData.type,
+      type: transactionData.type, // e.g., 'transfer'
       description: transactionData.description || '',
-      status: 'pending', // Initial status
+      status: 'syncing', // Always start as syncing
       createdAt: new Date().toISOString(),
       clientTimestamp: new Date().toISOString(),
-      isOffline: !this.isOnline,
+      isOffline: true, // Initially true, will be updated on sync
       senderPin: senderPin // Include PIN for server validation
     };
 
-    if (this.isOnline) {
-      try {
-        const response = await this.api.post('/transactions', transaction);
-        const serverTransaction = response.data.transaction;
-        
-        // Save successful transaction to local DB
-        await localDB.saveTransaction(serverTransaction);
-        
-        return serverTransaction;
-      } catch (error) {
-        // If online but request failed, queue for sync
-        transaction.status = 'pending'; // Keep as pending for retry
-        await localDB.saveTransaction(transaction);
-        await localDB.addToSyncQueue({
-          id: transactionId,
-          type: 'transaction',
-          data: transaction, // Store full transaction data for sync
-          priority: 1,
-          attempts: 0,
-          createdAt: new Date().toISOString()
+    // 1. Save to local IndexedDB immediately
+    await localDB.saveTransaction(transaction);
+    console.log(`API: Transaction ${transaction.id} saved to local DB with status 'syncing'.`);
+
+    // 2. Add to sync queue
+    await localDB.addToSyncQueue({
+      id: transactionId,
+      type: 'transaction',
+      data: transaction, // Store full transaction data for sync
+      priority: 1, // High priority for new transactions
+      attempts: 0,
+      createdAt: new Date().toISOString()
+    });
+    console.log(`API: Transaction ${transaction.id} added to sync queue.`);
+
+    // 3. Optimistically update sender's balance in local DB
+    try {
+      const currentUser = await localDB.getUserData('user');
+      if (currentUser && currentUser.bankAccounts) {
+        const updatedBankAccounts = currentUser.bankAccounts.map(account => {
+          if (account.id === fromBankAccountId) {
+            return { ...account, balance: account.balance - transaction.amount };
+          }
+          return account;
         });
-        throw new Error(error.response?.data?.error || 'Transaction failed - queued for sync');
+        await localDB.saveUserData('user', { ...currentUser, bankAccounts: updatedBankAccounts });
+        console.log(`API: Optimistically updated balance for account ${fromBankAccountId}`);
       }
-    } else {
-      // Offline - save to local database
-      transaction.status = 'pending';
-      await localDB.saveTransaction(transaction);
-      await localDB.addToSyncQueue({
-        id: transactionId,
-        type: 'transaction',
-        data: transaction, // Store full transaction data for sync
-        priority: 1,
-        attempts: 0,
-        createdAt: new Date().toISOString()
-      });
-      
-      return transaction;
+    } catch (balanceError) {
+      console.error('API: Failed to optimistically update local balance:', balanceError);
     }
+    // 3. If online and server healthy, trigger immediate sync
+    if (this.isOnline && this.isServerHealthy) {
+      console.log('API: Online and server healthy, triggering immediate sync.');
+      this.syncOfflineTransactions(); // Don't await, let it run in background
+    } else {
+      console.log('API: Offline or server unhealthy, sync will happen later.');
+    }
+    
+    // Return the locally saved transaction immediately for UI update
+    return transaction;
   }
 
   async getTransactions(page = 1, limit = 10) {
@@ -213,13 +274,16 @@ class ApiService {
     if (!this.isOnline) return;
 
     try {
-      await localDB.ready(); // Ensure IndexedDB is initialized
+      console.log('API: Starting offline transaction sync...');
       window.dispatchEvent(new CustomEvent('syncStarted'));
       
       const syncQueue = await localDB.getSyncQueue();
       const transactionSyncs = syncQueue.filter(item => item.type === 'transaction');
 
+      console.log(`API: Found ${transactionSyncs.length} transactions to sync`);
+
       if (transactionSyncs.length === 0) {
+        console.log('API: No transactions to sync');
         window.dispatchEvent(new CustomEvent('syncComplete', { detail: [] }));
         return;
       }
@@ -229,6 +293,8 @@ class ApiService {
       const response = await this.api.post('/sync/transactions', { transactions: transactionsToSync });
       const results = response.data.results;
 
+      console.log('API: Sync response received:', results);
+
       // Update local transaction statuses based on sync results
       const successfulIds = [];
       for (const result of results) {
@@ -237,11 +303,13 @@ class ApiService {
           successfulIds.push(result.id);
         } else {
           await localDB.updateTransactionStatus(result.id, 'failed');
+          console.log(`API: Transaction ${result.id} failed to sync:`, result.error);
         }
       }
 
       // Clear successful syncs from queue
       await localDB.clearSyncQueueItems(successfulIds);
+      console.log(`API: Cleared ${successfulIds.length} successful transactions from sync queue`);
       
       // Dispatch sync complete event
       window.dispatchEvent(new CustomEvent('transactionsSynced', { detail: results }));
@@ -254,8 +322,13 @@ class ApiService {
   async healthCheck() {
     try {
       const response = await this.api.get('/health');
-      return response.data.status === 'healthy';
+      const isHealthy = response.data.status === 'healthy';
+      this.isServerHealthy = isHealthy; // Update internal state
+      console.log(`API: Health check successful. Server status: ${isHealthy ? 'healthy' : 'unhealthy'}`);
+      return isHealthy;
     } catch (error) {
+      this.isServerHealthy = false; // Update internal state
+      console.error('API: Health check failed:', error.message);
       return false;
     }
   }

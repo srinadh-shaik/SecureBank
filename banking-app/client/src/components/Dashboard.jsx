@@ -6,37 +6,44 @@ import NetworkStatus from './NetworkStatus';
 import TransactionList from './TransactionList';
 import TransactionForm from './TransactionForm';
 import BankAccountSetup from './BankAccountSetup';
+import { useAuth } from '../contexts/AuthContext';
 
 const Dashboard = () => {
-  const [user, setUser] = useState(null); // Manage user state locally
+  const { user, logout, updateUserBankAccounts } = useAuth();
   const [transactions, setTransactions] = useState([]);
   const [showTransactionForm, setShowTransactionForm] = useState(false);
   const [showBankAccountSetup, setShowBankAccountSetup] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   const loadDashboardData = async () => {
+    if (!user) {
+      setIsLoading(false);
+      return;
+    }
+
     try {
       setIsLoading(true);
       
-      // Fetch user details (including bank accounts)
-      const fetchedUser = await apiService.getAccountDetails();
-      setUser(fetchedUser);
+      // Try to get fresh data from server
+      try {
+        const [accountDetails, transactionsData] = await Promise.all([
+          apiService.getAccountDetails(), // To get updated bank account balances
+          apiService.getTransactions(1, 20)
+        ]);
 
-      // Fetch transactions
-      const transactionsData = await apiService.getTransactions(1, 20);
-      setTransactions(transactionsData.transactions);
-
+        // Update user context with latest bank account details (removed explicit call, AuthContext handles it)
+        setTransactions(transactionsData.transactions);
+      } catch (error) {
+        // If server request fails, load from local storage
+        console.log('Loading from local storage...');
+        const localTransactions = await localDB.getTransactions();
+        setTransactions(localTransactions.sort((a, b) => 
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        ));
+        // User context already has cached bank accounts
+      }
     } catch (error) {
       console.error('Failed to load dashboard data:', error);
-      // Fallback to local data if API fails
-      const cachedUser = await localDB.getUserData('user');
-      if (cachedUser) {
-        setUser(cachedUser);
-      }
-      const localTransactions = await localDB.getTransactions();
-      setTransactions(localTransactions.sort((a, b) => 
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      ));
     } finally {
       setIsLoading(false);
     }
@@ -51,44 +58,42 @@ const Dashboard = () => {
     };
 
     window.addEventListener('transactionsSynced', handleTransactionUpdate);
-    window.addEventListener('transactionCreated', handleTransactionUpdate); // Listen for new transactions
 
     return () => {
       window.removeEventListener('transactionsSynced', handleTransactionUpdate);
-      window.removeEventListener('transactionCreated', handleTransactionUpdate);
     };
-  }, []); // Empty dependency array means this runs once on mount
+  }, [user]); // Depend on user to reload data when user object changes (e.g., after login)
 
   const handleTransactionSubmit = async (transactionData, fromBankAccountId, senderPin) => {
     if (!user) return;
 
+    console.log('Dashboard: Submitting transaction...', { fromBankAccountId, amount: transactionData.amount });
+
     try {
       const newTransaction = await apiService.createTransaction(transactionData, fromBankAccountId, senderPin);
+      console.log('Dashboard: Transaction created successfully:', newTransaction);
       
       // Optimistically update transactions list
       setTransactions(prev => [newTransaction, ...prev]);
       
       // Refresh bank account balances after transaction
-      await loadDashboardData(); // Re-fetch all data to ensure consistency
+      console.log('Dashboard: Updating user bank accounts...');
+      await updateUserBankAccounts();
       
+      console.log('Dashboard: Closing transaction form...');
       setShowTransactionForm(false);
       
+      console.log('Dashboard: Dispatching transactionCreated event...');
+      window.dispatchEvent(new CustomEvent('transactionCreated'));
     } catch (error) {
       console.error('Transaction failed:', error);
       // Reload data to show pending transactions or updated balances
       loadDashboardData();
+      // Don't close the form on error so user can see the error and retry
     }
   };
 
-  const handleLogout = () => {
-    apiService.logout(); // Clear local storage data
-    setUser(null); // Clear user state
-    setTransactions([]); // Clear transactions
-    // Optionally, reload the page to reset the app completely
-    window.location.reload();
-  };
-
-  if (isLoading || !user) { // Show loading until user data is fetched
+  if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
@@ -97,6 +102,10 @@ const Dashboard = () => {
         </div>
       </div>
     );
+  }
+
+  if (!user) {
+    return <div className="min-h-screen bg-gray-50 flex items-center justify-center">Not authenticated.</div>;
   }
 
   return (
@@ -110,7 +119,7 @@ const Dashboard = () => {
                 <User className="h-6 w-6 text-white" />
               </div>
               <div>
-                <h1 className="text-xl font-semibold text-gray-900">SecureBank</h1>
+                <h1 className="text-xl font-semibold text-gray-900">PayX</h1>
                 <p className="text-sm text-gray-600">
                   Welcome back, {user?.phone_number}
                 </p>
@@ -120,7 +129,7 @@ const Dashboard = () => {
             <div className="flex items-center space-x-4">
               <NetworkStatus />
               <button
-                onClick={handleLogout}
+                onClick={logout}
                 className="flex items-center space-x-1 text-gray-600 hover:text-gray-900 transition-colors text-sm"
               >
                 <LogOut className="h-5 w-5" />
@@ -223,7 +232,6 @@ const Dashboard = () => {
         <BankAccountSetup
           onCancel={() => setShowBankAccountSetup(false)}
           onSuccess={() => setShowBankAccountSetup(false)}
-          onAccountLinked={loadDashboardData} // Callback to refresh dashboard data
         />
       )}
     </div>

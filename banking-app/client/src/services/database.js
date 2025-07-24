@@ -6,7 +6,7 @@ export class LocalDatabase {
   dbName = 'BankingApp';
   version = 4; // Increment version for schema changes
   db = null;
-  initPromise = null; // To store the promise of database initialization
+  initPromise = null; // To track initialization status
 
   async init() {
     if (this.initPromise) {
@@ -62,11 +62,11 @@ export class LocalDatabase {
     return this.initPromise;
   }
 
-  // Ensures the database is initialized before any operation
   async ready() {
     if (!this.db) {
       await this.init();
     }
+    return this.initPromise;
   }
 
   encrypt(data) {

@@ -7,11 +7,26 @@ import sqlite3 from 'sqlite3';
 import { v4 as uuidv4 } from 'uuid';
 const jwt = await import('jsonwebtoken');
 const { verify, sign } = jwt.default;
-import { hashSync, compareSync } from 'bcryptjs';
+import bcrypt from 'bcryptjs';
+
+// import { hashSync, compareSync } from 'bcryptjs';
+
+
+// Twilio configuration (for actual SMS sending, uncomment and configure)
+// const twilioClient = require('twilio')(
+//   process.env.TWILIO_ACCOUNT_SID,
+//   process.env.TWILIO_AUTH_TOKEN
+// );
+// const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER;
+
+// In-memory store for OTPs (NOT FOR PRODUCTION - use Redis or similar)
+// Map<phoneNumber, { otp: string, expiry: Date, attempts: number, lastAttempt: Date }>
+const otpStore = new Map();
+
 
 const app = express();
-const PORT = process.env.PORT || 8000;
-const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production';
+const PORT =  8000;
+const JWT_SECRET =  'secrert@1211133dfde';
 
 // Security middleware
 app.use(helmet());
@@ -19,16 +34,29 @@ app.use(cors());
 app.use(json());
 
 // Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+const globalLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 150 minutes
   max: 100 // limit each IP to 100 requests per windowMs
 });
-app.use('/', limiter);
+app.use('/', globalLimiter);
 
+
+// OTP specific rate limiting
+const otpLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 100 minutes
+  max: 3, // 3 attempts per 100 minutes
+  keyGenerator: (req) => req.body.phoneNumber, // Rate limit by phone number
+  handler: (req, res) => {
+    res.status(429).json({ error: 'Too many OTP requests for this phone number. Please try again after 100 minutes.' });
+  }
+});
+
+// Database initialization
 const db = new sqlite3.Database('./bank.db');
+
+
 // Initialize database tables
 db.serialize(() => {
-  // Users table: Stores core user info (phone number for OTP auth)
   db.run(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
@@ -37,7 +65,6 @@ db.serialize(() => {
     )
   `);
 
-  // Bank_Accounts table: Stores linked bank accounts for users
   db.run(`
     CREATE TABLE IF NOT EXISTS bank_accounts (
       id TEXT PRIMARY KEY,
@@ -53,7 +80,6 @@ db.serialize(() => {
     )
   `);
 
-  // Transactions table: Stores all transaction records
   db.run(`
     CREATE TABLE IF NOT EXISTS transactions (
       id TEXT PRIMARY KEY,
@@ -72,41 +98,36 @@ db.serialize(() => {
   `);
 });
 
-// --- Automatic Demo User Provisioning ---
-const DEMO_USER_PHONE = '+919876543210';
-let demoUserId = null;
-
-// Initialize demo user on server startup
-db.get('SELECT id FROM users WHERE phone_number = ?', [DEMO_USER_PHONE], (err, userRow) => {
-  if (err) {
-    console.error('Error checking for demo user on startup:', err);
-    return;
+// Phone number validation utility
+const isValidPhoneNumber = (phoneNumber) => {
+  // Basic regex for international phone numbers (E.164 format recommended)
+  // This is a simplified regex. For production, use a dedicated library like 'libphonenumber-js'.
+  if (!/^\+[1-9]\d{1,14}$/.test(phoneNumber)) {
+    return false;
   }
-  if (userRow) {
-    demoUserId = userRow.id;
-    console.log(`Demo user ${DEMO_USER_PHONE} already exists with ID: ${demoUserId}`);
-  } else {
-    const newDemoUserId = uuidv4();
-    db.run('INSERT INTO users (id, phone_number) VALUES (?, ?)', [newDemoUserId, DEMO_USER_PHONE], (insertErr) => {
-      if (insertErr) {
-        console.error('Error creating demo user on startup:', insertErr);
-      } else {
-        demoUserId = newDemoUserId;
-        console.log(`Demo user ${DEMO_USER_PHONE} created with ID: ${demoUserId}`);
-      }
-    });
+  // Block known invalid/test ranges (e.g., +999, +123, etc.)
+  if (phoneNumber.startsWith('+999') || phoneNumber.startsWith('+123') || phoneNumber.startsWith('+0')) {
+    return false;
   }
-});
+  return true;
+};
 
-// Authentication middleware (Always authenticates as the demo user)
+// Authentication middleware
 const authenticateToken = (req, res, next) => {
-  if (!demoUserId) {
-    // This should ideally not happen if the server startup logic completes successfully
-    return res.status(500).json({ error: 'Demo user not initialized on server. Please restart the server.' });
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ error: 'Access token required' });
   }
-  // For this demo, we bypass JWT validation and directly assign the demo user
-  req.user = { id: demoUserId, phone_number: DEMO_USER_PHONE };
-  next();
+
+  verify(token, JWT_SECRET, (err, user) => {
+    if (err) {
+      return res.status(403).json({ error: 'Invalid or expired token' });
+    }
+    req.user = user; // Attach user payload (id, phone_number) to request
+    next();
+  });
 };
 
 // Health check endpoint
@@ -117,6 +138,136 @@ app.get('/health', (req, res) => {
     uptime: process.uptime()
   });
 });
+
+// --- Authentication Endpoints (Phone Number + OTP) ---
+
+app.post('/auth/request-otp', otpLimiter, (req, res) => {
+  const { phoneNumber } = req.body;
+
+  if (!phoneNumber) {
+    return res.status(400).json({ error: 'Phone number is required' });
+  }
+  if (!isValidPhoneNumber(phoneNumber)) {
+    return res.status(400).json({ error: 'Invalid phone number format or range.' });
+  }
+
+  // Generate a 6-digit OTP
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const expiry = new Date(Date.now() + 5 * 60 * 1000); // OTP valid for 5 minutes
+
+  otpStore.set(phoneNumber, { otp, expiry, attempts: 0, lastAttempt: new Date() });
+
+  // Simulate SMS sending (replace with actual Twilio/Firebase integration)
+  console.log(`OTP for ${phoneNumber}: ${otp}`); // Log OTP for demo purposes
+  /*
+  // Uncomment for actual Twilio integration
+  twilioClient.messages
+    .create({
+      body: `Your SecureBank OTP is: ${otp}`,
+      from: TWILIO_PHONE_NUMBER, // Your Twilio phone number
+      to: phoneNumber,
+    })
+    .then(message => console.log(`SMS sent: ${message.sid}`))
+    .catch(error => console.error(`Failed to send SMS: ${error.message}`));
+  */
+
+  res.json({ message: `OTP sent to ${phoneNumber}. OTP: ${otp} (for testing)` });
+});
+
+app.post('/auth/verify-otp', otpLimiter, (req, res) => {
+  const { phoneNumber, otp } = req.body;
+
+  if (!phoneNumber || !otp) {
+    return res.status(400).json({ error: 'Phone number and OTP are required' });
+  }
+  if (!isValidPhoneNumber(phoneNumber)) {
+    return res.status(400).json({ error: 'Invalid phone number format or range.' });
+  }
+
+  const storedOtpData = otpStore.get(phoneNumber);
+
+  if (!storedOtpData) {
+    return res.status(401).json({ error: 'OTP not requested or expired.' });
+  }
+
+  // Increment attempt count
+  storedOtpData.attempts++;
+  storedOtpData.lastAttempt = new Date();
+  otpStore.set(phoneNumber, storedOtpData); // Update store
+
+  if (storedOtpData.otp !== otp || new Date() > storedOtpData.expiry) {
+    // If OTP is incorrect or expired, and attempts exceed limit, clear OTP
+    if (storedOtpData.attempts >= 3) { // Max 3 tries for OTP verification
+      otpStore.delete(phoneNumber);
+      return res.status(401).json({ error: 'Invalid or expired OTP. Too many attempts, please request a new OTP.' });
+    }
+    return res.status(401).json({ error: 'Invalid or expired OTP.' });
+  }
+
+  // OTP is valid, remove it from store
+  otpStore.delete(phoneNumber);
+
+  db.get('SELECT id, phone_number FROM users WHERE phone_number = ?', [phoneNumber], (err, user) => {
+    if (err) {
+      return res.status(500).json({ error: 'Database error' });
+    }
+
+    let currentUser = user;
+    if (!currentUser) {
+      // Register new user
+      const userId = uuidv4();
+      db.run(
+        'INSERT INTO users (id, phone_number) VALUES (?, ?)',
+        [userId, phoneNumber],
+        function(insertErr) {
+          if (insertErr) {
+            return res.status(500).json({ error: 'Failed to register user' });
+          }
+          currentUser = { id: userId, phone_number: phoneNumber };
+          sendAuthResponse(res, currentUser, 'Account created successfully! Please link a bank account.');
+        }
+      );
+    } else {
+      // Login existing user
+      sendAuthResponse(res, currentUser, 'Login successful');
+    }
+  });
+});
+
+function sendAuthResponse(res, user, message) {
+  const token = sign(
+    { id: user.id, phone_number: user.phone_number },
+    JWT_SECRET,
+    { expiresIn: '24h' }
+  );
+
+  // Fetch linked bank accounts for the user
+  db.all('SELECT id, bank_name, account_number, ifsc_code, branch, balance FROM bank_accounts WHERE user_id = ?', [user.id], (err, bankAccounts) => {
+    if (err) {
+      console.error('Error fetching bank accounts for user:', err);
+      // Still send token and user, but with empty bank accounts
+      return res.json({
+        token,
+        user: {
+          id: user.id,
+          phone_number: user.phone_number,
+          bankAccounts: [],
+        },
+        message
+      });
+    }
+
+    res.json({
+      token,
+      user: {
+        id: user.id,
+        phone_number: user.phone_number,
+        bankAccounts: bankAccounts || [],
+      },
+      message
+    });
+  });
+}
 
 // --- Protected Account & Bank Account Endpoints ---
 
@@ -184,7 +335,6 @@ app.post('/bank-accounts/link', authenticateToken, (req, res) => {
 });
 
 app.get('/bank-accounts', authenticateToken, (req, res) => {
-  console.log("inside bank accounts");
   const userId = req.user.id;
   db.all('SELECT id, bank_name, account_number, ifsc_code, branch, balance FROM bank_accounts WHERE user_id = ?', [userId], (err, bankAccounts) => {
     if (err) {
@@ -334,6 +484,7 @@ app.post('/transactions', authenticateToken, (req, res) => {
                         description: description || '',
                         status: 'completed',
                         createdAt: new Date().toISOString(),
+                        clientTimestamp: clientTimestamp || new Date().toISOString(),
                         synced: 1
                       }
                     });
@@ -348,54 +499,6 @@ app.post('/transactions', authenticateToken, (req, res) => {
   });
 });
 
-app.get('/transactions', authenticateToken, (req, res) => {
-  const userId = req.user.id;
-  const page = parseInt(req.query.page) || 1;
-  const limit = parseInt(req.query.limit) || 10;
-  const offset = (page - 1) * limit;
-
-  // First, get all bank account IDs for the current user
-  db.all('SELECT id FROM bank_accounts WHERE user_id = ?', [userId], (err, userBankAccounts) => {
-    if (err) {
-      console.error('Error fetching user bank accounts for transactions:', err);
-      return res.status(500).json({ error: 'Database error' });
-    }
-    const userBankAccountIds = userBankAccounts.map(acc => acc.id);
-
-    if (userBankAccountIds.length === 0) {
-      return res.json({ transactions: [], page, limit, hasMore: false });
-    }
-
-    const placeholders = userBankAccountIds.map(() => '?').join(',');
-    db.all(
-      `SELECT t.*, 
-              sba.account_number AS from_account_number, sba.bank_name AS from_bank_name, sba.ifsc_code AS from_ifsc_code, sba.branch AS from_branch,
-              rba.account_number AS to_account_number, rba.bank_name AS to_bank_name, rba.ifsc_code AS to_ifsc_code, rba.branch AS to_branch
-       FROM transactions t
-       JOIN bank_accounts sba ON t.from_bank_account_id = sba.id
-       JOIN bank_accounts rba ON t.to_bank_account_id = rba.id
-       WHERE t.from_bank_account_id IN (${placeholders}) OR t.to_bank_account_id IN (${placeholders})
-       ORDER BY t.created_at DESC
-       LIMIT ? OFFSET ?`,
-      [...userBankAccountIds, ...userBankAccountIds, limit, offset],
-      (err, transactions) => {
-        if (err) {
-          console.error('Error fetching transactions:', err);
-          return res.status(500).json({ error: 'Database error' });
-        }
-
-        res.json({
-          transactions: transactions || [],
-          page,
-          limit,
-          hasMore: transactions.length === limit
-        });
-      }
-    );
-  });
-});
-
-// Sync endpoint for offline transactions
 app.post('/sync/transactions', authenticateToken, (req, res) => {
   const { transactions } = req.body;
   const userId = req.user.id;
@@ -404,114 +507,189 @@ app.post('/sync/transactions', authenticateToken, (req, res) => {
     return res.status(400).json({ error: 'Transactions must be an array' });
   }
 
-  const results = [];
-  let completed = 0;
-
   if (transactions.length === 0) {
     return res.json({ results: [] });
   }
 
-  transactions.forEach((transaction, index) => {
-    const { id, fromBankAccountId, toAccountNumber, toIfscCode, toBranch, amount, senderPin, type, description, clientTimestamp } = transaction;
+  const results = [];
+  let shouldRollback = false;
 
-    db.serialize(() => {
-      db.run('BEGIN TRANSACTION');
+  db.serialize(() => {
+    db.run('BEGIN TRANSACTION', (err) => {
+      if (err) {
+        console.error('Failed to begin transaction for sync:', err);
+        return res.status(500).json({ error: 'Failed to start sync transaction' });
+      }
 
-      // 1. Verify sender's bank account and PIN
-      db.get('SELECT id, user_id, balance, pin_hash FROM bank_accounts WHERE id = ?', [fromBankAccountId], (err, senderAccount) => {
-        if (err || !senderAccount || senderAccount.user_id !== userId || !bcrypt.compareSync(senderPin, senderAccount.pin_hash) || senderAccount.balance < amount) {
-          db.run('ROLLBACK');
-          const errorMsg = err ? 'Database error' : (!senderAccount ? 'Sender account not found' : (senderAccount.user_id !== userId ? 'Unauthorized sender account' : (!bcrypt.compareSync(senderPin, senderAccount.pin_hash) ? 'Invalid sender PIN' : 'Insufficient funds')));
-          results[index] = { id, status: 'failed', error: errorMsg };
-          console.error('Offline transaction sync failed (sender verification):', { transactionId: id, reason: errorMsg, timestamp: new Date().toISOString(), userId });
-          completed++;
-          if (completed === transactions.length) {
-            res.json({ results });
-          }
-          return;
-        }
+      let i = 0;
+      const processNextTransaction = () => {
+        if (i < transactions.length) {
+          const transaction = transactions[i];
+          const currentIndex = i; // Capture current index for results array
+          const { id, fromBankAccountId, toAccountNumber, toIfscCode, toBranch, amount, senderPin, type, description, clientTimestamp } = transaction;
 
-        // 2. Look up recipient's bank account
-        db.get('SELECT id FROM bank_accounts WHERE account_number = ? AND ifsc_code = ? AND branch = ?',
-          [toAccountNumber, toIfscCode, toBranch],
-          (err, recipientAccount) => {
-            if (err || !recipientAccount) {
-              db.run('ROLLBACK');
-              const errorMsg = err ? 'Database error' : 'Recipient bank account not found';
-              results[index] = { id, status: 'failed', error: errorMsg };
-              console.error('Offline transaction sync failed (recipient lookup):', { transactionId: id, reason: errorMsg, timestamp: new Date().toISOString(), userId });
-              completed++;
-              if (completed === transactions.length) {
-                res.json({ results });
-              }
+          // 1. Verify sender's bank account and PIN
+          db.get('SELECT id, user_id, balance, pin_hash FROM bank_accounts WHERE id = ?', [fromBankAccountId], (err, senderAccount) => {
+            if (err || !senderAccount || senderAccount.user_id !== userId || !bcrypt.compareSync(senderPin, senderAccount.pin_hash) || senderAccount.balance < amount) {
+              const errorMsg = err ? 'Database error' : (!senderAccount ? 'Sender account not found' : (senderAccount.user_id !== userId ? 'Unauthorized sender account' : (!bcrypt.compareSync(senderPin, senderAccount.pin_hash) ? 'Invalid sender PIN' : 'Insufficient funds')));
+              results[currentIndex] = { id, status: 'failed', error: errorMsg };
+              console.error('Offline transaction sync failed (sender verification):', { transactionId: id, reason: errorMsg, timestamp: new Date().toISOString(), userId });
+              shouldRollback = true; // Mark for rollback
+              i++;
+              processNextTransaction(); // Process next
               return;
             }
 
-            const toBankAccountId = recipientAccount.id;
-
-            // Prevent self-transfer
-            if (fromBankAccountId === toBankAccountId) {
-              db.run('ROLLBACK');
-              results[index] = { id, status: 'failed', error: 'Cannot transfer to the same account' };
-              console.error('Offline transaction sync failed (self-transfer):', { transactionId: id, reason: 'Cannot transfer to the same account', timestamp: new Date().toISOString(), userId });
-              completed++;
-              if (completed === transactions.length) {
-                res.json({ results });
-              }
-              return;
-            }
-
-            // 3. Update balances
-            db.run('UPDATE bank_accounts SET balance = balance - ? WHERE id = ?', [amount, fromBankAccountId], (err) => {
-              if (err) {
-                db.run('ROLLBACK');
-                results[index] = { id, status: 'failed', error: 'Failed to update sender balance' };
-                console.error('Offline transaction sync failed (update sender balance):', { transactionId: id, reason: 'Failed to update sender balance', timestamp: new Date().toISOString(), userId });
-                completed++;
-                if (completed === transactions.length) {
-                  res.json({ results });
-                }
-                return;
-              }
-
-              db.run('UPDATE bank_accounts SET balance = balance + ? WHERE id = ?', [amount, toBankAccountId], (err) => {
-                if (err) {
-                  db.run('ROLLBACK');
-                  results[index] = { id, status: 'failed', error: 'Failed to update recipient balance' };
-                  console.error('Offline transaction sync failed (update recipient balance):', { transactionId: id, reason: 'Failed to update recipient balance', timestamp: new Date().toISOString(), userId });
-                  completed++;
-                  if (completed === transactions.length) {
-                    res.json({ results });
-                  }
+            // 2. Look up recipient's bank account
+            db.get('SELECT id FROM bank_accounts WHERE account_number = ? AND ifsc_code = ? AND branch = ?',
+              [toAccountNumber, toIfscCode, toBranch],
+              (err, recipientAccount) => {
+                if (err || !recipientAccount) {
+                  const errorMsg = err ? 'Database error' : 'Recipient bank account not found';
+                  results[currentIndex] = { id, status: 'failed', error: errorMsg };
+                  console.error('Offline transaction sync failed (recipient lookup):', { transactionId: id, reason: errorMsg, timestamp: new Date().toISOString(), userId });
+                  shouldRollback = true; // Mark for rollback
+                  i++;
+                  processNextTransaction(); // Process next
                   return;
                 }
 
-                // 4. Create transaction record or update existing one (if it was a pending offline transaction)
-                db.run(
-                  `INSERT OR REPLACE INTO transactions 
-                   (id, from_bank_account_id, to_bank_account_id, amount, type, description, status, client_timestamp, created_at, synced) 
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                  [id, fromBankAccountId, toBankAccountId, amount, type, description || '', 'completed', clientTimestamp || new Date().toISOString(), new Date().toISOString(), 1],
-                  (err) => {
-                    if (err) {
-                      db.run('ROLLBACK');
-                      results[index] = { id, status: 'failed', error: 'Failed to create/update transaction record' };
-                      console.error('Offline transaction sync failed (create/update transaction record):', { transactionId: id, reason: 'Failed to create/update transaction record', timestamp: new Date().toISOString(), userId });
-                    } else {
-                      db.run('COMMIT');
-                      results[index] = { id, status: 'success' };
-                    }
-                    completed++;
-                    if (completed === transactions.length) {
-                      res.json({ results });
-                    }
+                const toBankAccountId = recipientAccount.id;
+
+                // Prevent self-transfer
+                if (fromBankAccountId === toBankAccountId) {
+                  results[currentIndex] = { id, status: 'failed', error: 'Cannot transfer to the same account' };
+                  console.error('Offline transaction sync failed (self-transfer):', { transactionId: id, reason: 'Cannot transfer to the same account', timestamp: new Date().toISOString(), userId });
+                  shouldRollback = true; // Mark for rollback
+                  i++;
+                  processNextTransaction(); // Process next
+                  return;
+                }
+
+                // 3. Update balances
+                db.run('UPDATE bank_accounts SET balance = balance - ? WHERE id = ?', [amount, fromBankAccountId], (err) => {
+                  if (err) {
+                    results[currentIndex] = { id, status: 'failed', error: 'Failed to update sender balance' };
+                    console.error('Offline transaction sync failed (update sender balance):', { transactionId: id, reason: 'Failed to update sender balance', timestamp: new Date().toISOString(), userId });
+                    shouldRollback = true; // Mark for rollback
+                    i++;
+                    processNextTransaction(); // Process next
+                    return;
                   }
-                );
-              });
+
+                  console.log(`Sync - Updated sender balance: Account ${fromBankAccountId}, deducted ${amount}`);
+                  db.run('UPDATE bank_accounts SET balance = balance + ? WHERE id = ?', [amount, toBankAccountId], (err) => {
+                    if (err) {
+                      results[currentIndex] = { id, status: 'failed', error: 'Failed to update recipient balance' };
+                      console.error('Offline transaction sync failed (update recipient balance):', { transactionId: id, reason: 'Failed to update recipient balance', timestamp: new Date().toISOString(), userId });
+                      shouldRollback = true; // Mark for rollback
+                      i++;
+                      processNextTransaction(); // Process next
+                      return;
+                    }
+
+                    console.log(`Sync - Updated recipient balance: Account ${toBankAccountId}, added ${amount}`);
+
+                    // 4. Create transaction record or update existing one
+                    db.run(
+                      `INSERT OR REPLACE INTO transactions 
+                       (id, from_bank_account_id, to_bank_account_id, amount, type, description, status, client_timestamp, created_at, synced) 
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                      [id, fromBankAccountId, toBankAccountId, amount, type, description || '', 'completed', clientTimestamp || new Date().toISOString(), new Date().toISOString(), 1],
+                      (err) => {
+                        if (err) {
+                          results[currentIndex] = { id, status: 'failed', error: 'Failed to create/update transaction record' };
+                          console.error('Offline transaction sync failed (create/update transaction record):', { transactionId: id, reason: 'Failed to create/update transaction record', timestamp: new Date().toISOString(), userId });
+                          shouldRollback = true; // Mark for rollback
+                        } else {
+                          results[currentIndex] = { id, status: 'success' };
+                        }
+                        i++;
+                        processNextTransaction(); // Process next
+                      }
+                    );
+                  });
+                });
+              }
+            );
+          });
+        } else {
+          // All transactions processed, now commit or rollback
+          if (shouldRollback) {
+            db.run('ROLLBACK', (err) => {
+              if (err) console.error('Rollback error:', err);
+              res.json({ results });
+            });
+          } else {
+            db.run('COMMIT', (err) => {
+              if (err) console.error('Commit error:', err);
+              res.json({ results });
             });
           }
-        );
-      });
+        }
+      };
+      processNextTransaction(); // Start processing
+    });
+  });
+});
+
+app.get('/transactions', authenticateToken, (req, res) => {
+  const userId = req.user.id;
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 10;
+  const offset = (page - 1) * limit;
+
+  // First, get the count of transactions for pagination
+  db.get(`
+    SELECT COUNT(t.id) AS total
+    FROM transactions t
+    LEFT JOIN bank_accounts from_acc ON t.from_bank_account_id = from_acc.id
+    LEFT JOIN bank_accounts to_acc ON t.to_bank_account_id = to_acc.id
+    WHERE
+      from_acc.user_id = ? OR to_acc.user_id = ?
+  `, [userId, userId], (err, countRow) => {
+    if (err) {
+      console.error('Error counting transactions:', err);
+      return res.status(500).json({ error: 'Database error' });
+    }
+
+    const totalTransactions = countRow.total;
+    const hasMore = (page * limit) < totalTransactions;
+
+    // Then, fetch the paginated transactions
+    db.all(`
+      SELECT
+          t.id,
+          t.from_bank_account_id,
+          t.to_bank_account_id,
+          t.amount,
+          t.type,
+          t.description,
+          t.status,
+          t.created_at,
+          t.client_timestamp,
+          t.synced,
+          from_acc.bank_name AS from_bank_name,
+          from_acc.account_number AS from_account_number,
+          to_acc.bank_name AS to_bank_name,
+          to_acc.account_number AS to_account_number
+      FROM
+          transactions t
+      LEFT JOIN
+          bank_accounts from_acc ON t.from_bank_account_id = from_acc.id
+      LEFT JOIN
+          bank_accounts to_acc ON t.to_bank_account_id = to_acc.id
+      WHERE
+          from_acc.user_id = ? OR to_acc.user_id = ?
+      ORDER BY
+          t.created_at DESC
+      LIMIT ? OFFSET ?;
+    `, [userId, userId, limit, offset], (err, transactions) => {
+      if (err) {
+        console.error('Error fetching transactions:', err);
+        return res.status(500).json({ error: 'Database error' });
+      }
+      res.json({ transactions: transactions || [], hasMore });
     });
   });
 });
@@ -520,6 +698,35 @@ app.post('/sync/transactions', authenticateToken, (req, res) => {
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).json({ error: 'Something went wrong!' });
+});
+
+// Graceful shutdown handling
+process.on('SIGINT', () => {
+  console.log('\nReceived SIGINT. Gracefully shutting down...');
+  
+  // Close SQLite database connection
+  db.close((err) => {
+    if (err) {
+      console.error('Error closing database:', err);
+    } else {
+      console.log('Database connection closed.');
+    }
+    process.exit(0);
+  });
+});
+
+process.on('SIGTERM', () => {
+  console.log('\nReceived SIGTERM. Gracefully shutting down...');
+  
+  // Close SQLite database connection
+  db.close((err) => {
+    if (err) {
+      console.error('Error closing database:', err);
+    } else {
+      console.log('Database connection closed.');
+    }
+    process.exit(0);
+  });
 });
 
 // Start server

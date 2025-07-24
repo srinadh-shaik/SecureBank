@@ -1,95 +1,122 @@
-// import React, { createContext, useContext, useState, useEffect } from 'react';
-// import { apiService } from '../services/api';
-// import { localDB } from '../services/database';
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import { apiService } from '../services/api';
+import { localDB } from '../services/database';
 
-// const AuthContext = createContext(undefined);
+const AuthContext = createContext(undefined);
 
-// export const useAuth = () => {
-//   const context = useContext(AuthContext);
-//   if (!context) {
-//     throw new Error('useAuth must be used within an AuthProvider');
-//   }
-//   return context;
-// };
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+};
 
-// export const AuthProvider = ({ children }) => {
-//   const [user, setUser] = useState(null);
-//   const [isLoading, setIsLoading] = useState(true);
+export const AuthProvider = ({ children }) => {
+  const [user, setUser] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
 
-//   useEffect(() => {
-//     const initializeAuth = async () => {
-//       try {
-//         await localDB.init();
+  useEffect(() => {
+    const initializeAuth = async () => {
+      try {
+        await localDB.init(); // Ensure IndexedDB is initialized first
         
-//         // Attempt to log in the demo user automatically
-//         try {
-//           const { user: demoUser } = await apiService.demoLogin();
-//           setUser(demoUser);
-//         } catch (error) {
-//           console.error('Automatic demo login failed:', error);
-//           // Fallback to cached user if demo login fails (e.g., server not running)
-//           const cachedUser = await localDB.getUserData('user');
-//           if (cachedUser) {
-//             setUser(cachedUser);
-//           } else {
-//             // If no cached user and demo login failed, user is truly not authenticated
-//             apiService.logout(); 
-//           }
-//         }
-//       } catch (error) {
-//         console.error('Auth initialization failed:', error);
-//       } finally {
-//         setIsLoading(false);
-//       }
-//     };
+        const token = apiService.getToken();
+        if (token) {
+          try {
+            const userDetails = await apiService.getAccountDetails();
+            setUser(userDetails);
+          } catch (error) {
+            console.error('Failed to fetch user details with existing token:', error);
+            // If token is invalid or expired, try to load from cache
+            const cachedUser = await localDB.getUserData('user');
+            if (cachedUser) {
+              setUser(cachedUser);
+            } else {
+              apiService.logout(); // Clear invalid token and user data
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Auth initialization failed:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
 
-//     initializeAuth();
+    initializeAuth();
 
-//     // Listen for sync events to update user bank accounts/details
-//     const handleTransactionsSynced = async () => {
-//       if (user) {
-//         try {
-//           const updatedUser = await apiService.getAccountDetails();
-//           setUser(updatedUser);
-//         } catch (error) {
-//           console.error('Failed to update user after sync:', error);
-//         }
-//       }
-//     };
+    // Listen for sync events to update user bank accounts/details
+    const handleTransactionsSynced = async () => {
+      if (user) {
+        try {
+          const updatedUser = await apiService.getAccountDetails();
+          setUser(updatedUser);
+        } catch (error) {
+          console.error('Failed to update user after sync:', error);
+        }
+      }
+    };
 
-//     window.addEventListener('transactionsSynced', handleTransactionsSynced);
+    window.addEventListener('transactionsSynced', handleTransactionsSynced);
 
-//     return () => {
-//       window.removeEventListener('transactionsSynced', handleTransactionsSynced);
-//     };
-//   }, [user?.id]); // Re-run if user ID changes (e.g., after login/logout)
+    return () => {
+      window.removeEventListener('transactionsSynced', handleTransactionsSynced);
+    };
+  }, []); // Changed: run only once on mount to avoid repeated calls and 429 errors
 
-//   const logout = () => {
-//     apiService.logout();
-//     setUser(null);
-//   };
+  const requestOtp = async (phoneNumber) => {
+    try {
+      const response = await apiService.requestOtp(phoneNumber);
+      return response.message;
+    } catch (error) {
+      throw error;
+    }
+  };
 
-//   const updateUserBankAccounts = async () => {
-//     if (user) {
-//       try {
-//         const updatedUser = await apiService.getAccountDetails();
-//         setUser(updatedUser);
-//       } catch (error) {
-//         console.error('Failed to update user bank accounts:', error);
-//       }
-//     }
-//   };
+  const verifyOtp = async (phoneNumber, otp) => {
+    try {
+      const { user: verifiedUser } = await apiService.verifyOtp(phoneNumber, otp);
+      setUser(verifiedUser);
+    } catch (error) {
+      throw error;
+    }
+  };
 
-//   const value = {
-//     user,
-//     logout,
-//     isLoading,
-//     updateUserBankAccounts,
-//   };
+  const logout = () => {
+    apiService.logout();
+    setUser(null);
+    
+    // Additional cleanup - clear any pending transactions from IndexedDB
+    localDB.clearSyncQueue().catch(err => console.error('Failed to clear sync queue on logout:', err));
+  };
 
-//   return (
-//     <AuthContext.Provider value={value}>
-//       {children}
-//     </AuthContext.Provider>
-//   );
-// };
+  const updateUserBankAccounts = async () => {
+    if (user) {
+      try {
+        console.log('AuthContext: Updating user bank accounts...');
+        const updatedUser = await apiService.getAccountDetails();
+        console.log('AuthContext: Updated user data received:', updatedUser);
+        setUser(updatedUser);
+        console.log('AuthContext: User state updated with new bank account data');
+      } catch (error) {
+        console.error('Failed to update user bank accounts:', error);
+      }
+    }
+  };
+
+  const value = {
+    user,
+    requestOtp,
+    verifyOtp,
+    logout,
+    isLoading,
+    updateUserBankAccounts,
+  };
+
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+    </AuthContext.Provider>
+  );
+};

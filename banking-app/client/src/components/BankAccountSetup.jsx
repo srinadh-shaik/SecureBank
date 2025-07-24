@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { X, Banknote, AlertTriangle, CheckCircle } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 import { apiService } from '../services/api';
 
 const indianBanks = [
@@ -25,7 +26,8 @@ const indianBanks = [
   "Karnataka Bank"
 ];
 
-const BankAccountSetup = ({ onCancel, onSuccess, onAccountLinked }) => {
+const BankAccountSetup = ({ onCancel, onSuccess }) => {
+  const { user, updateUserBankAccounts } = useAuth();
   const [formData, setFormData] = useState({
     bankName: '',
     accountNumber: '',
@@ -69,7 +71,7 @@ const BankAccountSetup = ({ onCancel, onSuccess, onAccountLinked }) => {
         formData.pin
       );
       setSuccess(response.message);
-      onAccountLinked(); // Notify parent to refresh user data
+      await updateUserBankAccounts(); // Refresh user's bank accounts in context
       onSuccess(); // Close modal and indicate success
     } catch (err) {
       setError(err.message || 'Failed to link bank account');

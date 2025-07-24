@@ -91,7 +91,7 @@ const TransactionList = ({ transactions, userBankAccounts }) => {
                   <p className="text-sm text-gray-500">
                     {transaction.description || 
                      (isOutgoing ? `To: ${transaction.to_bank_name || 'Unknown'} (${transaction.to_account_number || transaction.toBankAccountId})` : `From: ${transaction.from_bank_name || 'Unknown'} (${transaction.from_account_number || transaction.fromBankAccountId})`)
-                    }
+                    } 
                   </p>
                   <p className="text-xs text-gray-400">
                     {formatDate(transaction.createdAt)}
