@@ -1,4 +1,4 @@
-banking website made with 
+### banking website made with 
 ### react 
 ### Node and Express.js
 ### Database - SQLite
