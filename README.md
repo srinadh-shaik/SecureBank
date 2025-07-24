@@ -1,6 +1,6 @@
 # banking website made with 
-### react 
-### Node and Express.js
+### FrontEnd - react 
+### Backend - Node and Express.js
 ### Database - SQLite
 ### cache - LocalDatabase
 
