@@ -1,8 +1,8 @@
 banking website made with 
-# react 
-# Node and Express.js
-# Database - SQLite
-# cache - LocalDatabase
+### react 
+### Node and Express.js
+### Database - SQLite
+### cache - LocalDatabase
 
 ### Features 
 User can be able to pay the bank even under offline network.
