@@ -127,13 +127,6 @@ const AuthForm = () => {
           </div>
         </form>
 
-        <div className="text-center">
-          <div className="bg-white rounded-lg shadow-sm p-4 space-y-2">
-            <p className="text-sm text-gray-600">
-              For testing, the OTP will be displayed in the server console and in the success message.
-            </p>
-          </div>
-        </div>
       </div>
     </div>
   );

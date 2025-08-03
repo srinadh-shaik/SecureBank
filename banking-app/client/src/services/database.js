@@ -4,7 +4,7 @@ const ENCRYPTION_KEY = 'your-encryption-key-here-change-in-production';
 
 export class LocalDatabase {
   dbName = 'BankingApp';
-  version = 4; // Increment version for schema changes
+  version = 5; // Increment version for schema changes
   db = null;
   initPromise = null; // To track initialization status
 
