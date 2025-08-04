@@ -43,8 +43,8 @@ app.use('/', globalLimiter);
 
 // OTP specific rate limiting
 const otpLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000, // 100 minutes
-  max: 3, // 3 attempts per 100 minutes
+  windowMs: 1 * 60 *1, // 1 minute
+  max: 3, // 3 attempts per 1 minute
   keyGenerator: (req) => req.body.phoneNumber, // Rate limit by phone number
   handler: (req, res) => {
     res.status(429).json({ error: 'Too many OTP requests for this phone number. Please try again after 100 minutes.' });
