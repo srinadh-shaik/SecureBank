@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { localDB } from './database';
 
-const API_BASE_URL = 'https://localhost:8000/';
+const API_BASE_URL = 'http://localhost:8000/';
 
 
 class ApiService {
@@ -333,10 +333,4 @@ class ApiService {
     }
   }
 }
-
-<<<<<<< HEAD
 export const apiService = new ApiService();
-
-=======
-export const apiService = new ApiService();
->>>>>>> 1bf951f (Describe what you changed)

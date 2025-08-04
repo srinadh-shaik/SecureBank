@@ -176,25 +176,25 @@ app.post('/auth/request-otp', otpLimiter, (req, res) => {
 
 app.post('/auth/verify-otp', otpLimiter, (req, res) => {
   const { phoneNumber, otp } = req.body;
-
+  console.log(`Verifying OTP for ${phoneNumber}: ${otp}`);
   if (!phoneNumber || !otp) {
     return res.status(400).json({ error: 'Phone number and OTP are required' });
   }
   if (!isValidPhoneNumber(phoneNumber)) {
     return res.status(400).json({ error: 'Invalid phone number format or range.' });
   }
-
+  console.log(`OTP Store:`, otpStore);
   const storedOtpData = otpStore.get(phoneNumber);
 
   if (!storedOtpData) {
     return res.status(401).json({ error: 'OTP not requested or expired.' });
   }
-
+  console.log(`Stored OTP Data:`, storedOtpData);
   // Increment attempt count
   storedOtpData.attempts++;
   storedOtpData.lastAttempt = new Date();
   otpStore.set(phoneNumber, storedOtpData); // Update store
-
+  console.log(`Updated OTP Store:`, otpStore);
   if (storedOtpData.otp !== otp || new Date() > storedOtpData.expiry) {
     // If OTP is incorrect or expired, and attempts exceed limit, clear OTP
     if (storedOtpData.attempts >= 3) { // Max 3 tries for OTP verification
