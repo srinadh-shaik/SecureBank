@@ -2,7 +2,7 @@
 ### FrontEnd - react 
 ### Backend - Node and Express.js
 ### Database - SQLite
-### cache - LocalDatabase
+### LocalDatabase - IndexedDb
 
 ### Features 
 User can be able to pay the bank even under offline network.
