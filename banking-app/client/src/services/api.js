@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { localDB } from './database';
 
-const API_BASE_URL = 'http://localhost:8000/';
+const API_BASE_URL = 'https://payx-kaqu.onrender.com';
 
 
 class ApiService {
@@ -334,3 +334,4 @@ class ApiService {
   }
 }
 export const apiService = new ApiService();
+
