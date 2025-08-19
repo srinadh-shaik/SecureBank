@@ -54,6 +54,7 @@ const AuthForm = () => {
           <h2 className="text-3xl font-bold text-gray-900 mb-2">PayX</h2>
           <p className="text-gray-600">
             {otpRequested ? 'Verify your phone number' : 'Sign in or create an account'}
+            enter your number with country code eg:'+91'
           </p>
         </div>
 
@@ -131,5 +132,6 @@ const AuthForm = () => {
     </div>
   );
 };
+
 
 export default AuthForm;
