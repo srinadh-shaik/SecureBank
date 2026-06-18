@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Send, AlertTriangle, Search, RefreshCw, CheckCircle} from 'lucide-react';
+import { X, ArrowRight, Search, CheckCircle, Building2 } from 'lucide-react';
 import { useNetwork } from '../contexts/NetworkContext';
 import { apiService } from '../services/api';
 
@@ -25,297 +25,143 @@ const TransactionForm = ({ onSubmit, onCancel, userBankAccounts }) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
     if (name === 'toAccountNumber' || name === 'toIfscCode' || name === 'toBranch') {
-      setRecipientDetails(null); // Clear recipient details on input change
+      setRecipientDetails(null);
     }
   };
 
   const handleLookupRecipient = async () => {
-    setError('');
-    setRecipientDetails(null);
-    setIsLookingUpRecipient(true);
-
+    setError(''); setRecipientDetails(null); setIsLookingUpRecipient(true);
     if (!formData.toAccountNumber || !formData.toIfscCode || !formData.toBranch) {
-      setError('Please enter recipient account number, IFSC code, and branch to look up.');
-      setIsLookingUpRecipient(false);
-      return;
+      setError('Enter recipient account, IFSC, and branch to look up.');
+      setIsLookingUpRecipient(false); return;
     }
-
     try {
-      const details = await apiService.lookupBankAccount(
-        formData.toAccountNumber,
-        formData.toIfscCode,
-        formData.toBranch
-      );
+      const details = await apiService.lookupBankAccount(formData.toAccountNumber, formData.toIfscCode, formData.toBranch);
       setRecipientDetails(details);
-      setSuccess('Recipient found!');
     } catch (err) {
-      setError(err.message || 'Failed to look up recipient.');
+      setError(err.message || 'Failed to verify recipient.');
     } finally {
       setIsLookingUpRecipient(false);
     }
   };
 
   const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-    setSuccess('');
-    setIsSubmitting(true);
-
+    e.preventDefault(); setError(''); setSuccess(''); setIsSubmitting(true);
     const parsedAmount = parseFloat(formData.amount);
     if (isNaN(parsedAmount) || parsedAmount <= 0) {
-      setError('Please enter a valid positive amount.');
-      setIsSubmitting(false);
-      return;
+      setError('Enter a valid positive amount.'); setIsSubmitting(false); return;
     }
-
-    // Create a new formData object with the parsed amount
-    const transactionDataToSend = {
-      ...formData,
-      amount: parsedAmount,
-    };
-
-    console.log('TransactionForm: Submitting transaction...', formData);
-
     if (!recipientDetails && networkStatus.isOnline) {
-      setError('Please look up and confirm recipient details first.');
-      setIsSubmitting(false);
-      return;
+      setError('Please verify recipient details first.'); setIsSubmitting(false); return;
     }
     if (!/^\d{4}$/.test(formData.senderPin)) {
-      setError('Sender PIN must be a 4-digit number.');
-      setIsSubmitting(false);
-      return;
+      setError('PIN must be a 4-digit number.'); setIsSubmitting(false); return;
     }
 
+    const transactionDataToSend = { ...formData, amount: parsedAmount };
     try {
-      // Pass the full transaction data, fromBankAccountId, and senderPin
       await onSubmit(transactionDataToSend, formData.fromBankAccountId, formData.senderPin);
-      console.log('TransactionForm: Transaction submitted successfully');
-      setSuccess('Transaction initiated successfully!');
-      
-      // Close form after a brief delay to show success message
-      setTimeout(() => {
-        console.log('TransactionForm: Auto-closing form after success');
-        onCancel(); // This will close the form
-      }, 1500);
+      setSuccess('Payment successful!');
+      setTimeout(() => onCancel(), 1500);
     } catch (err) {
-      console.error('TransactionForm: Transaction submission failed:', err);
       setError(err.message || 'Transaction failed');
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const inputClass = "w-full bg-transparent border-b-2 border-white/10 py-3 text-white focus:border-indigo-500 outline-none transition-colors placeholder:text-slate-600 text-sm";
+
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-screen overflow-y-auto">
-        <div className="flex items-center justify-between p-6 border-b">
-          <h2 className="text-xl font-semibold text-gray-900">Send Money</h2>
-          <button
-            onClick={onCancel}
-            className="text-gray-400 hover:text-gray-600 transition-colors"
-          >
-            <X className="h-6 w-6" />
+    <div className="fixed inset-0 bg-[#0d0914]/80 backdrop-blur-sm z-50 overflow-y-auto sm:p-6 lg:p-10 flex justify-center items-start sm:items-center font-sans text-slate-200">
+      
+      {/* Container: Full width on mobile, max-w-lg + rounded modal on desktop */}
+      <div className="w-full max-w-lg min-h-screen sm:min-h-0 sm:max-h-[90vh] sm:rounded-[2.5rem] bg-[#0d0914] sm:border sm:border-white/10 shadow-2xl flex flex-col relative custom-scrollbar overflow-y-auto">
+        
+        {/* Header */}
+        <div className="flex items-center justify-between p-5 sm:p-6 border-b border-white/5 sticky top-0 bg-[#0d0914]/90 backdrop-blur-md z-10">
+          <button onClick={onCancel} className="p-2 bg-white/5 rounded-full hover:bg-white/10 transition">
+            <X className="w-5 h-5 text-white" />
           </button>
+          <div className="flex space-x-1">
+            <div className="w-1.5 h-1.5 rounded-full bg-slate-600"></div>
+            <div className="w-1.5 h-1.5 rounded-full bg-indigo-500"></div>
+          </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          {/* Offline Warning */}
-          {!networkStatus.isOnline && (
-            <div className="flex items-center space-x-2 text-amber-600 bg-amber-50 p-3 rounded-lg">
-              <AlertTriangle className="w-5 h-5" />
-              <span className="text-sm">You're offline. Transaction will be queued for sync.</span>
+        <form onSubmit={handleSubmit} className="flex flex-col flex-grow px-6 pb-6">
+          
+          {/* Big Amount Input */}
+          <div className="flex flex-col items-center justify-center py-12">
+            <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-4">Enter Amount</p>
+            <div className="flex items-center justify-center text-white">
+              <span className="text-4xl sm:text-5xl font-medium mr-2 text-slate-500">₹</span>
+              <input 
+                type="number" 
+                name="amount" 
+                value={formData.amount} 
+                onChange={handleInputChange} 
+                className="bg-transparent text-5xl sm:text-6xl font-black tabular-nums w-48 sm:w-56 text-center outline-none placeholder:text-slate-800" 
+                placeholder="0" 
+                min="0.01" step="0.01" required autoFocus 
+              />
             </div>
-          )}
+            {error && <p className="text-rose-500 text-xs mt-6 font-medium bg-rose-500/10 border border-rose-500/20 px-4 py-2 rounded-full">{error}</p>}
+            {success && <p className="text-emerald-500 text-xs mt-6 font-medium bg-emerald-500/10 border border-emerald-500/20 px-4 py-2 rounded-full flex items-center gap-2"><CheckCircle className="w-4 h-4"/> {success}</p>}
+          </div>
 
-          {error && (
-            <div className="flex items-center space-x-2 text-red-600 bg-red-50 p-3 rounded-lg">
-              <AlertTriangle className="w-5 h-5" />
-              <span className="text-sm">{error}</span>
+          {/* Transfer Details Form */}
+          <div className="bg-[#1a1423] rounded-[2rem] p-6 space-y-5 mb-auto shadow-inner border border-white/5">
+            
+            <div className="flex items-center gap-4 mb-2 border-b border-white/5 pb-5">
+              <div className="w-12 h-12 rounded-full bg-indigo-500/20 flex items-center justify-center text-indigo-400 shrink-0">
+                <Building2 className="w-6 h-6" />
+              </div>
+              <div className="flex-grow">
+                <input type="text" name="toAccountNumber" value={formData.toAccountNumber} onChange={handleInputChange} className={inputClass} placeholder="Recipient Account Number" required />
+              </div>
             </div>
-          )}
 
-          {success && (
-            <div className="flex items-center space-x-2 text-green-600 bg-green-50 p-3 rounded-lg">
-              <CheckCircle className="w-5 h-5" />
-              <span className="text-sm">{success}</span>
+            <div className="grid grid-cols-2 gap-6">
+              <input type="text" name="toIfscCode" value={formData.toIfscCode} onChange={handleInputChange} className={`${inputClass} uppercase`} placeholder="IFSC Code" required />
+              <div className="flex items-end gap-2">
+                <input type="text" name="toBranch" value={formData.toBranch} onChange={handleInputChange} className={inputClass} placeholder="Branch" required />
+                <button type="button" onClick={handleLookupRecipient} disabled={isLookingUpRecipient || !networkStatus.isOnline} className="mb-1 p-2.5 bg-indigo-600 rounded-xl text-white hover:bg-indigo-500 transition-colors disabled:opacity-50 flex-shrink-0 shadow-lg">
+                  <Search className="w-5 h-5" />
+                </button>
+              </div>
             </div>
-          )}
 
-          <div>
-            <label htmlFor="fromBankAccountId" className="block text-sm font-medium text-gray-700 mb-1">
-              From Account
-            </label>
-            <select
-              id="fromBankAccountId"
-              name="fromBankAccountId"
-              value={formData.fromBankAccountId}
-              onChange={handleInputChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-              required
-            >
-              {userBankAccounts.map(account => (
-                <option key={account.id} value={account.id}>
-                  {account.bank_name} ({account.account_number}) - ₹{account.balance.toFixed(2)}
+            {recipientDetails && (
+              <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 flex items-center gap-3">
+                <CheckCircle className="w-5 h-5 text-emerald-500" />
+                <p className="text-xs font-bold text-emerald-400 tracking-wide">Verified: {recipientDetails.bank_name}</p>
+              </div>
+            )}
+
+            <input type="text" name="description" value={formData.description} onChange={handleInputChange} className={inputClass} placeholder="Add a note (Optional)" />
+          </div>
+
+          {/* Secure Payment Bottom Bar */}
+          <div className="mt-10">
+            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3 px-2">Select Debit Account</label>
+            <select name="fromBankAccountId" value={formData.fromBankAccountId} onChange={handleInputChange} className="w-full bg-[#1a1423] border border-white/10 text-white p-5 rounded-2xl outline-none mb-6 appearance-none font-medium text-sm focus:border-indigo-500 transition-colors" required>
+              {userBankAccounts.map(acc => (
+                <option key={acc.id} value={acc.id}>
+                  {acc.bank_name} • Avail: ₹{acc.balance.toFixed(2)}
                 </option>
               ))}
             </select>
-          </div>
 
-          <div>
-            <label htmlFor="toAccountNumber" className="block text-sm font-medium text-gray-700 mb-1">
-              Recipient Account Number
-            </label>
-            <input
-              type="text"
-              id="toAccountNumber"
-              name="toAccountNumber"
-              value={formData.toAccountNumber}
-              onChange={handleInputChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-              placeholder="Enter account number"
-              required
-            />
-          </div>
+            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3 px-2">Enter 4-Digit Security PIN</label>
+            <input type="password" name="senderPin" value={formData.senderPin} onChange={handleInputChange} className="w-full bg-[#1a1423] border border-white/10 text-white p-5 rounded-2xl outline-none mb-8 text-center tracking-[1em] font-mono text-2xl focus:border-indigo-500 transition-colors" placeholder="••••" maxLength={4} required />
 
-          <div>
-            <label htmlFor="toIfscCode" className="block text-sm font-medium text-gray-700 mb-1">
-              Recipient IFSC Code
-            </label>
-            <input
-              type="text"
-              id="toIfscCode"
-              name="toIfscCode"
-              value={formData.toIfscCode}
-              onChange={handleInputChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-              placeholder="e.g., SBIN0001234"
-              required
-            />
-          </div>
-
-          <div>
-            <label htmlFor="toBranch" className="block text-sm font-medium text-gray-700 mb-1">
-              Recipient Branch
-            </label>
-            <div className="flex items-center space-x-2">
-              <input
-                type="text"
-                id="toBranch"
-                name="toBranch"
-                value={formData.toBranch}
-                onChange={handleInputChange}
-                className="flex-grow px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                placeholder="Enter branch name"
-                required
-              />
-              <button
-                type="button"
-                onClick={handleLookupRecipient}
-                disabled={isLookingUpRecipient || !networkStatus.isOnline}
-                className="p-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50"
-                title="Look up recipient"
-              >
-                {isLookingUpRecipient ? (
-                  <RefreshCw className="h-5 w-5 animate-spin" />
-                ) : (
-                  <Search className="h-5 w-5" />
-                )}
-              </button>
-            </div>
-            {recipientDetails && (
-              <p className="text-sm text-green-700 mt-1">
-                Sending to: {recipientDetails.bank_name} ({recipientDetails.account_number})
-              </p>
-            )}
-          </div>
-
-          <div>
-            <label htmlFor="amount" className="block text-sm font-medium text-gray-700 mb-1">
-              Amount (INR)
-            </label>
-            <input
-              type="number"
-              id="amount"
-              name="amount"
-              value={formData.amount}
-              onChange={handleInputChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-              placeholder="0.00"
-              min="0.01"
-              step="0.01"
-              required
-            />
-          </div>
-
-          <div>
-            <label htmlFor="type" className="block text-sm font-medium text-gray-700 mb-1">
-              Transaction Type
-            </label>
-            <select
-              id="type"
-              name="type"
-              value={formData.type}
-              onChange={handleInputChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:focus:border-indigo-500"
-            >
-              <option value="transfer">Transfer</option>
-              <option value="payment">Payment</option>
-              <option value="withdrawal">Withdrawal</option>
-              <option value="deposit">Deposit</option>
-            </select>
-          </div>
-
-          <div>
-            <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-1">
-              Description (Optional)
-            </label>
-            <input
-              type="text"
-              id="description"
-              name="description"
-              value={formData.description}
-              onChange={handleInputChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-              placeholder="What's this for?"
-            />
-          </div>
-
-          <div>
-            <label htmlFor="senderPin" className="block text-sm font-medium text-gray-700 mb-1">
-              Your 4-Digit Bank PIN
-            </label>
-            <input
-              type="password"
-              id="senderPin"
-              name="senderPin"
-              value={formData.senderPin}
-              onChange={handleInputChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-              placeholder="****"
-              maxLength={4}
-              required
-            />
-          </div>
-
-          <div className="flex space-x-3 pt-4">
-            <button
-              type="button"
-              onClick={onCancel}
-              className="flex-1 py-2 px-4 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={isSubmitting || (networkStatus.isOnline && !recipientDetails)}
-              className="flex-1 flex items-center justify-center space-x-2 py-2 px-4 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
-            >
-              <Send className="h-4 w-4" />
-              <span>{isSubmitting ? 'Processing...' : 'Send Money'}</span>
+            <button type="submit" disabled={isSubmitting || (networkStatus.isOnline && !recipientDetails)} className="w-full bg-indigo-600 text-white p-5 rounded-2xl font-bold text-lg flex items-center justify-center gap-2 hover:bg-indigo-500 transition-all shadow-[0_0_20px_rgba(79,70,229,0.3)] disabled:opacity-50">
+              {isSubmitting ? 'Processing...' : `Pay ₹${formData.amount || '0'}`} <ArrowRight className="w-6 h-6" />
             </button>
           </div>
         </form>
+
       </div>
     </div>
   );

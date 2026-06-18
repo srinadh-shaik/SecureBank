@@ -1,3 +1,14 @@
+// 1. Load Environment Variables First
+import dotenv from 'dotenv';
+dotenv.config();
+
+// ADD THESE 4 LINES:
+console.log("--- STARTUP CHECK ---");
+console.log("Twilio SID Loaded:", !!process.env.TWILIO_ACCOUNT_SID); 
+console.log("Twilio Token Loaded:", !!process.env.TWILIO_AUTH_TOKEN);
+console.log("Twilio From Number:", process.env.TWILIO_PHONE_NUMBER);
+console.log("---------------------");
+
 import express, { json } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -9,24 +20,29 @@ const jwt = await import('jsonwebtoken');
 const { verify, sign } = jwt.default;
 import bcrypt from 'bcryptjs';
 
-// import { hashSync, compareSync } from 'bcryptjs';
+// 2. Import and Initialize Twilio
+import twilio from 'twilio';
 
+const twilioClient = twilio(
+  process.env.TWILIO_ACCOUNT_SID,
+  process.env.TWILIO_AUTH_TOKEN
+);
+const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER;
 
-// Twilio configuration (for actual SMS sending, uncomment and configure)
-// const twilioClient = require('twilio')(
-//   process.env.TWILIO_ACCOUNT_SID,
-//   process.env.TWILIO_AUTH_TOKEN
-// );
-// const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER;
-
-// In-memory store for OTPs (NOT FOR PRODUCTION - use Redis or similar)
-// Map<phoneNumber, { otp: string, expiry: Date, attempts: number, lastAttempt: Date }>
+// In-memory store for OTPs
 const otpStore = new Map();
 
-
 const app = express();
-const PORT =  8000;
-const JWT_SECRET =  'secrert@1211133dfde';
+const PORT = 8000;
+// Throw an error if the secret is missing so the server doesn't start insecurely
+if (!process.env.JWT_SECRET) {
+  console.error("FATAL ERROR: JWT_SECRET is not defined in .env");
+  process.exit(1);
+}
+
+const JWT_SECRET = process.env.JWT_SECRET;
+
+
 
 // Security middleware
 app.use(helmet());
@@ -141,37 +157,48 @@ app.get('/health', (req, res) => {
 
 // --- Authentication Endpoints (Phone Number + OTP) ---
 
-app.post('/auth/request-otp', otpLimiter, (req, res) => {
+app.post('/auth/request-otp', otpLimiter, async (req, res) => {
   const { phoneNumber } = req.body;
+  
+  console.log(`\n[1] OTP Request received for: ${phoneNumber}`);
 
   if (!phoneNumber) {
     return res.status(400).json({ error: 'Phone number is required' });
   }
   if (!isValidPhoneNumber(phoneNumber)) {
-    return res.status(400).json({ error: 'Invalid phone number format or range.' });
+    return res.status(400).json({ error: 'Invalid phone number format.' });
   }
 
-  // Generate a 6-digit OTP
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  const expiry = new Date(Date.now() + 5 * 60 * 1000); // OTP valid for 5 minutes
+  const expiry = new Date(Date.now() + 5 * 60 * 1000); 
 
   otpStore.set(phoneNumber, { otp, expiry, attempts: 0, lastAttempt: new Date() });
 
-  // Simulate SMS sending (replace with actual Twilio/Firebase integration)
-  console.log(`OTP for ${phoneNumber}: ${otp}`); // Log OTP for demo purposes
-  /*
-  // Uncomment for actual Twilio integration
-  twilioClient.messages
-    .create({
-      body: `Your SecureBank OTP is: ${otp}`,
-      from: TWILIO_PHONE_NUMBER, // Your Twilio phone number
-      to: phoneNumber,
-    })
-    .then(message => console.log(`SMS sent: ${message.sid}`))
-    .catch(error => console.error(`Failed to send SMS: ${error.message}`));
-  */
+  console.log(`[2] Generated OTP: ${otp}. Attempting to contact Twilio...`);
 
-  res.json({ message: `OTP sent to ${phoneNumber}. OTP: ${otp} (for testing)` });
+  try {
+    const message = await twilioClient.messages.create({
+      body: `Your SecureBank verification code is: ${otp}. Do not share this.`,
+      from: TWILIO_PHONE_NUMBER,
+      to: phoneNumber,
+    });
+    
+    console.log(`[3] SUCCESS! Twilio accepted the message.`);
+    console.log(`    Message SID: ${message.sid}`);
+    console.log(`    Status: ${message.status}`);
+    
+    res.json({ message: `OTP sent successfully to ${phoneNumber}` });
+    
+  } catch (error) {
+    console.log(`[3]  TWILIO FAILED TO SEND!`);
+    console.error(`    HTTP Status:`, error.status);
+    console.error(`    Twilio Error Code:`, error.code);
+    console.error(`    Message:`, error.message);
+    console.error(`    More Info:`, error.moreInfo); // This usually gives a link to fix it
+    
+    otpStore.delete(phoneNumber);
+    res.status(500).json({ error: 'Failed to send OTP via SMS. Check server logs.' });
+  }
 });
 
 app.post('/auth/verify-otp', otpLimiter, (req, res) => {

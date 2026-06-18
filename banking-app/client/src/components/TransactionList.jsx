@@ -1,113 +1,101 @@
 import React from 'react';
-import { ArrowUpRight, ArrowDownLeft, Clock, CheckCircle, XCircle, RefreshCw } from 'lucide-react';
+import { ArrowUpRight, ArrowDownLeft, Clock } from 'lucide-react';
 
 const TransactionList = ({ transactions, userBankAccounts }) => {
-  const getStatusIcon = (status) => {
-    switch (status) {
-      case 'completed':
-        return <CheckCircle className="h-5 w-5 text-green-500" />;
-      case 'pending':
-        return <Clock className="h-5 w-5 text-yellow-500" />;
-      case 'failed':
-        return <XCircle className="h-5 w-5 text-red-500" />;
-      case 'syncing':
-        return <RefreshCw className="h-5 w-5 text-blue-500 animate-spin" />;
-      default:
-        return <Clock className="h-5 w-5 text-gray-500" />;
-    }
-  };
-
   const getStatusText = (status) => {
     switch (status) {
-      case 'completed':
-        return 'Completed';
-      case 'pending':
-        return 'Pending';
-      case 'failed':
-        return 'Failed';
-      case 'syncing':
-        return 'Syncing';
-      default:
-        return 'Unknown';
+      case 'completed': return <span className="text-emerald-400">Successful</span>;
+      case 'pending': return <span className="text-amber-400">Pending</span>;
+      case 'failed': return <span className="text-rose-400">Failed</span>;
+      case 'syncing': return <span className="text-indigo-400">Queued</span>;
+      default: return null;
     }
   };
 
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'completed':
-        return 'text-green-600 bg-green-50';
-      case 'pending':
-        return 'text-yellow-600 bg-yellow-50';
-      case 'failed':
-        return 'text-red-600 bg-red-50';
-      case 'syncing':
-        return 'text-blue-600 bg-blue-50';
-      default:
-        return 'text-gray-600 bg-gray-50';
+  // Safely format the date, handling different backend variable names and invalid dates
+  const formatExactDateTime = (dateInput) => {
+    if (!dateInput) return 'Processing...';
+    try {
+      const date = new Date(dateInput);
+      if (isNaN(date.getTime())) return 'Pending Sync'; // Prevents "Invalid Date" error
+      
+      const datePart = date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+      const timePart = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+      return `${datePart}, ${timePart}`;
+    } catch (error) {
+      return 'Processing...';
     }
   };
 
-  const formatDate = (dateString) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  // Dynamically generate the title based on sender/receiver data
+  const getTransactionTitle = (transaction, isOutgoing) => {
+    if (transaction.description) return transaction.description;
+
+    if (isOutgoing) {
+      const bankName = transaction.to_bank_name || 'Unknown Bank';
+      const accNum = transaction.to_account_number || transaction.toBankAccountId;
+      const maskedAcc = accNum ? `(**${String(accNum).slice(-4)})` : '';
+      return `To: ${bankName} ${maskedAcc}`;
+    } else {
+      const bankName = transaction.from_bank_name || 'Unknown Bank';
+      const accNum = transaction.from_account_number || transaction.fromBankAccountId;
+      const maskedAcc = accNum ? `(**${String(accNum).slice(-4)})` : '';
+      return `From: ${bankName} ${maskedAcc}`;
+    }
   };
 
   if (transactions.length === 0) {
     return (
-      <div className="p-8 text-center text-gray-500">
-        <Clock className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-        <p>No transactions yet</p>
-        <p className="text-sm">Your transaction history will appear here</p>
+      <div className="p-10 text-center text-slate-500 h-full flex flex-col items-center justify-center">
+        <Clock className="h-10 w-10 mx-auto mb-4 opacity-30" />
+        <p className="text-sm font-medium tracking-wide">No transactions to show</p>
       </div>
     );
   }
 
   return (
-    <div className="divide-y divide-gray-200">
+    <div className="flex flex-col">
       {transactions.map((transaction) => {
+        // Determine if money is leaving the user's account
         const isOutgoing = userBankAccounts.some(acc => acc.id === transaction.fromBankAccountId);
         
+        // Grab the correct date field (handling both camelCase and snake_case)
+        const transactionDate = transaction.createdAt || transaction.created_at || transaction.timestamp;
+        
         return (
-          <div key={transaction.id} className="p-4 hover:bg-gray-50 transition-colors">
+          <div key={transaction.id} className="p-4 sm:p-5 border-b border-white/5 last:border-0 hover:bg-white/[0.03] transition-colors rounded-2xl">
             <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                <div className="flex-shrink-0">
+              
+              <div className="flex items-center space-x-4">
+                <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/5 flex items-center justify-center shrink-0">
                   {isOutgoing ? (
-                    <ArrowUpRight className="h-6 w-6 text-red-500" />
+                    <ArrowUpRight className="h-5 w-5 text-slate-400" />
                   ) : (
-                    <ArrowDownLeft className="h-6 w-6 text-green-500" />
+                    <ArrowDownLeft className="h-5 w-5 text-emerald-400" />
                   )}
                 </div>
+                
                 <div>
-                  <div className="flex items-center space-x-2">
-                    <p className="text-sm font-medium text-gray-900">
-                      {transaction.type.charAt(0).toUpperCase() + transaction.type.slice(1)}
-                    </p>
-                    <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(transaction.status)}`}>
-                      {getStatusIcon(transaction.status)}
-                      <span className="ml-1">{getStatusText(transaction.status)}</span>
-                    </span>
-                  </div>
-                  <p className="text-sm text-gray-500">
-                    {transaction.description || 
-                     (isOutgoing ? `To: ${transaction.to_bank_name || 'Unknown'} (${transaction.to_account_number || transaction.toBankAccountId})` : `From: ${transaction.from_bank_name || 'Unknown'} (${transaction.from_account_number || transaction.fromBankAccountId})`)
-                    } 
+                  <p className="text-sm font-bold text-slate-200 mb-1">
+                    {getTransactionTitle(transaction, isOutgoing)}
                   </p>
-                  <p className="text-xs text-gray-400">
-                    {formatDate(transaction.createdAt)}
-                    {transaction.isOffline && (
-                      <span className="ml-2 text-amber-600">(Offline)</span>
-                    )}
+                  <p className="text-xs text-slate-400 font-medium tracking-wide mb-1">
+                    {getStatusText(transaction.status)}
+                  </p>
+                  <p className="text-[10px] text-slate-500 font-mono tracking-wider">
+                    {formatExactDateTime(transactionDate)}
                   </p>
                 </div>
               </div>
-              <div className="text-right">
-                <p className={`text-sm font-medium ${
-                  isOutgoing ? 'text-red-600' : 'text-green-600'
+
+              <div className="text-right shrink-0 pl-4">
+                <p className={`text-lg font-black tabular-nums tracking-tight ${
+                  isOutgoing ? 'text-slate-200' : 'text-emerald-400'
                 }`}>
-                  {isOutgoing ? '-' : '+'}{transaction.amount.toFixed(2)}
+                  {isOutgoing ? '-' : '+'}₹{transaction.amount.toFixed(2)}
                 </p>
               </div>
+
             </div>
           </div>
         );

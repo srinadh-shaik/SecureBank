@@ -1,54 +1,41 @@
 import React from 'react';
-import { Wifi, WifiOff, RefreshCw, CheckCircle } from 'lucide-react';
 import { useNetwork } from '../contexts/NetworkContext';
 
 const NetworkStatus = () => {
   const { networkStatus, triggerSync } = useNetwork();
 
-  const getStatusColor = () => {
-    if (networkStatus.syncInProgress) return 'text-blue-500';
-    if (networkStatus.isOnline) return 'text-green-500';
-    return 'text-red-500';
-  };
-
-  const getStatusText = () => {
-    if (networkStatus.syncInProgress) return 'Syncing...';
-    if (networkStatus.isOnline) return 'Online';
-    return 'Offline';
-  };
-
-  const getStatusIcon = () => {
-    if (networkStatus.syncInProgress) {
-      return <RefreshCw className="w-4 h-4 animate-spin" />;
-    }
-    if (networkStatus.isOnline) {
-      return <Wifi className="w-4 h-4" />;
-    }
-    return <WifiOff className="w-4 h-4" />;
-  };
+  if (networkStatus.syncInProgress) {
+    return (
+      <div className="flex flex-col items-end">
+        <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 shadow-[0_0_10px_rgba(99,102,241,0.2)]">
+          <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse"></div>
+          <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-400">Live</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex items-center space-x-2 text-sm">
-      <div className={`flex items-center space-x-1 ${getStatusColor()}`}>
-        {getStatusIcon()}
-        <span>{getStatusText()}</span>
+    <div className="flex flex-col items-end gap-1">
+      <div className="flex items-center gap-2">
+        <div className={`w-1.5 h-1.5 rounded-full shadow-[0_0_8px_currentColor] ${networkStatus.isOnline ? 'bg-emerald-500 text-emerald-500' : 'bg-rose-500 text-rose-500'}`}></div>
+        <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+          {networkStatus.isOnline ? 'Online' : 'Offline'}
+        </span>
       </div>
       
       {networkStatus.lastSync && (
-        <div className="flex items-center space-x-1 text-gray-500">
-          <CheckCircle className="w-3 h-3" />
-          <span className="text-xs">
-            Last sync: {new Date(networkStatus.lastSync).toLocaleTimeString()}
-          </span>
-        </div>
+        <span className="text-[9px] text-slate-600 font-medium tracking-wide">
+          Last sync: {new Date(networkStatus.lastSync).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        </span>
       )}
       
       {networkStatus.isOnline && !networkStatus.syncInProgress && (
         <button
           onClick={triggerSync}
-          className="text-blue-500 hover:text-blue-600 text-xs underline"
+          className="text-[10px] text-indigo-400 hover:text-indigo-300 underline font-medium tracking-wide mt-1"
         >
-          Sync now
+          Force Sync
         </button>
       )}
     </div>
