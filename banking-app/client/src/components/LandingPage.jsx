@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Smartphone, HardDrive, Shield, QrCode } from 'lucide-react';
-import PhoneMockup from './PhoneMockup';
+import PhoneMockup from './PhoneMockUp';
 import SecurityBadge from './SecurityBadge';
 
 // Import our new separated files
