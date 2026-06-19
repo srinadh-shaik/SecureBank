@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { X, Star, Share2, Download, Building2, ShieldCheck, AlertTriangle, CheckCircle } from 'lucide-react';
-import { QRCodeSVG } from 'qrcode.react';
+// Make sure to use Canvas so html2canvas can capture it!
+import { QRCodeCanvas } from 'qrcode.react'; 
 import html2canvas from 'html2canvas';
 import { apiService } from '../services/api';
 
@@ -14,14 +15,15 @@ const UserProfileDrawer = ({ isOpen, onClose, user, onUpdateAccounts }) => {
   const [pinError, setPinError] = useState('');
   const [pinSuccess, setPinSuccess] = useState('');
 
-  // Find current primary account (assuming it's the first one, or use a boolean flag if your DB sends it)
+// Find current primary account (assuming it's the first one, or use a boolean flag if your DB sends it)
   const primaryAccount = user?.bankAccounts?.[0]; 
   const qrData = primaryAccount 
     ? JSON.stringify({
         acc: primaryAccount.account_number,
         ifsc: primaryAccount.ifsc_code,
         bank: primaryAccount.bank_name,
-        name: user?.name || user?.phone_number || 'User'
+        name: user?.name || user?.phone_number || 'User',
+        city: user?.city || 'Not specified' // <-- ADDED CITY HERE
       })
     : "NO_ACCOUNT";
 
@@ -36,7 +38,7 @@ const UserProfileDrawer = ({ isOpen, onClose, user, onUpdateAccounts }) => {
   };
 
   const shareToWhatsApp = () => {
-    const text = `Pay me securely! \n\nTransfer directly to my ${primaryAccount?.bank_name} account:\nName: ${user?.name || 'User'}\nA/C: ${primaryAccount?.account_number}\nIFSC: ${primaryAccount?.ifsc_code}`;
+    const text = `Pay me securely! \n\nTransfer directly to my ${primaryAccount?.bank_name} account:\nName: ${user?.name || 'User'}\nA/C: ${primaryAccount?.account_number}\nIFSC: ${primaryAccount?.ifsc_code} \nCity: ${user?.city}`;
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`);
   };
 
@@ -107,7 +109,7 @@ const UserProfileDrawer = ({ isOpen, onClose, user, onUpdateAccounts }) => {
               <>
                 <div className="flex flex-col items-center mb-6">
                   <div ref={qrRef} className="bg-white p-3 rounded-[1.5rem] shadow-[0_0_30px_rgba(79,70,229,0.15)]">
-                    <QRCodeSVG value={qrData} size={180} level={"H"} fgColor="#0d0914" />
+                    <QRCodeCanvas value={qrData} size={180} level={"H"} fgColor="#0d0914" />
                   </div>
                   <p className="text-[11px] font-bold text-indigo-400 mt-4 bg-indigo-500/10 px-3 py-1 rounded-full border border-indigo-500/20">
                     Receiving to: {primaryAccount.bank_name}
