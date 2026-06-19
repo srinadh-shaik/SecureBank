@@ -267,7 +267,6 @@ export class LocalDatabase {
   async getUserData(key) {
     await this.ready(); // Ensure DB is ready
     if (!this.db) throw new Error('Database not initialized');
-
     return new Promise((resolve, reject) => {
       const transactionDb = this.db.transaction(['userData'], 'readonly');
       const store = transactionDb.objectStore('userData');

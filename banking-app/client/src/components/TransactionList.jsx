@@ -12,12 +12,11 @@ const TransactionList = ({ transactions, userBankAccounts }) => {
     }
   };
 
-  // Safely format the date, handling different backend variable names and invalid dates
   const formatExactDateTime = (dateInput) => {
     if (!dateInput) return 'Processing...';
     try {
       const date = new Date(dateInput);
-      if (isNaN(date.getTime())) return 'Pending Sync'; // Prevents "Invalid Date" error
+      if (isNaN(date.getTime())) return 'Pending Sync'; 
       
       const datePart = date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
       const timePart = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
@@ -27,7 +26,6 @@ const TransactionList = ({ transactions, userBankAccounts }) => {
     }
   };
 
-  // Dynamically generate the title based on sender/receiver data
   const getTransactionTitle = (transaction, isOutgoing) => {
     if (transaction.description) return transaction.description;
 
@@ -56,16 +54,12 @@ const TransactionList = ({ transactions, userBankAccounts }) => {
   return (
     <div className="flex flex-col">
       {transactions.map((transaction) => {
-        // Determine if money is leaving the user's account
         const isOutgoing = userBankAccounts.some(acc => acc.id === transaction.fromBankAccountId);
-        
-        // Grab the correct date field (handling both camelCase and snake_case)
         const transactionDate = transaction.createdAt || transaction.created_at || transaction.timestamp;
         
         return (
           <div key={transaction.id} className="p-4 sm:p-5 border-b border-white/5 last:border-0 hover:bg-white/[0.03] transition-colors rounded-2xl">
             <div className="flex items-center justify-between">
-              
               <div className="flex items-center space-x-4">
                 <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/5 flex items-center justify-center shrink-0">
                   {isOutgoing ? (
@@ -74,7 +68,6 @@ const TransactionList = ({ transactions, userBankAccounts }) => {
                     <ArrowDownLeft className="h-5 w-5 text-emerald-400" />
                   )}
                 </div>
-                
                 <div>
                   <p className="text-sm font-bold text-slate-200 mb-1">
                     {getTransactionTitle(transaction, isOutgoing)}
@@ -87,7 +80,6 @@ const TransactionList = ({ transactions, userBankAccounts }) => {
                   </p>
                 </div>
               </div>
-
               <div className="text-right shrink-0 pl-4">
                 <p className={`text-lg font-black tabular-nums tracking-tight ${
                   isOutgoing ? 'text-slate-200' : 'text-emerald-400'
@@ -95,7 +87,6 @@ const TransactionList = ({ transactions, userBankAccounts }) => {
                   {isOutgoing ? '-' : '+'}₹{transaction.amount.toFixed(2)}
                 </p>
               </div>
-
             </div>
           </div>
         );

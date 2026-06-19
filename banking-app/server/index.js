@@ -73,15 +73,16 @@ const db = new sqlite3.Database('./bank.db');
 
 // Initialize database tables
 db.serialize(() => {
-  db.run(`
+ db.run(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       phone_number TEXT UNIQUE NOT NULL,
+      name TEXT, -- ADD THIS LINE
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
-  db.run(`
+ db.run(`
     CREATE TABLE IF NOT EXISTS bank_accounts (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -91,11 +92,12 @@ db.serialize(() => {
       branch TEXT NOT NULL,
       pin_hash TEXT NOT NULL,
       balance REAL DEFAULT 0,
+      is_primary BOOLEAN DEFAULT 0, -- YOU NEED TO ADD THIS LINE HERE TOO!
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users (id)
     )
   `);
-
+  
   db.run(`
     CREATE TABLE IF NOT EXISTS transactions (
       id TEXT PRIMARY KEY,
@@ -158,7 +160,7 @@ app.get('/health', (req, res) => {
 // --- Authentication Endpoints (Phone Number + OTP) ---
 
 app.post('/auth/request-otp', otpLimiter, async (req, res) => {
-  const { phoneNumber } = req.body;
+  const { phoneNumber, name } = req.body;
   
   console.log(`\n[1] OTP Request received for: ${phoneNumber}`);
 
@@ -172,7 +174,7 @@ app.post('/auth/request-otp', otpLimiter, async (req, res) => {
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
   const expiry = new Date(Date.now() + 5 * 60 * 1000); 
 
-  otpStore.set(phoneNumber, { otp, expiry, attempts: 0, lastAttempt: new Date() });
+  otpStore.set(phoneNumber, { otp, expiry, attempts: 0, lastAttempt: new Date(), pendingName: name });
 
   console.log(`[2] Generated OTP: ${otp}. Attempting to contact Twilio...`);
 
@@ -210,31 +212,32 @@ app.post('/auth/verify-otp', otpLimiter, (req, res) => {
   if (!isValidPhoneNumber(phoneNumber)) {
     return res.status(400).json({ error: 'Invalid phone number format or range.' });
   }
-  console.log(`OTP Store:`, otpStore);
+  
   const storedOtpData = otpStore.get(phoneNumber);
 
   if (!storedOtpData) {
     return res.status(401).json({ error: 'OTP not requested or expired.' });
   }
-  console.log(`Stored OTP Data:`, storedOtpData);
+  
   // Increment attempt count
   storedOtpData.attempts++;
   storedOtpData.lastAttempt = new Date();
-  otpStore.set(phoneNumber, storedOtpData); // Update store
-  console.log(`Updated OTP Store:`, otpStore);
+  otpStore.set(phoneNumber, storedOtpData); 
+  
   if (storedOtpData.otp !== otp || new Date() > storedOtpData.expiry) {
-    // If OTP is incorrect or expired, and attempts exceed limit, clear OTP
-    if (storedOtpData.attempts >= 3) { // Max 3 tries for OTP verification
+    if (storedOtpData.attempts >= 3) { 
       otpStore.delete(phoneNumber);
       return res.status(401).json({ error: 'Invalid or expired OTP. Too many attempts, please request a new OTP.' });
     }
     return res.status(401).json({ error: 'Invalid or expired OTP.' });
   }
 
-  // OTP is valid, remove it from store
+  // UPDATE: Extract the name before deleting from store
+  const pendingName = storedOtpData.pendingName;
   otpStore.delete(phoneNumber);
 
-  db.get('SELECT id, phone_number FROM users WHERE phone_number = ?', [phoneNumber], (err, user) => {
+  // UPDATE: Added 'name' to the SELECT query
+  db.get('SELECT id, phone_number, name FROM users WHERE phone_number = ?', [phoneNumber], (err, user) => {
     if (err) {
       return res.status(500).json({ error: 'Database error' });
     }
@@ -243,14 +246,17 @@ app.post('/auth/verify-otp', otpLimiter, (req, res) => {
     if (!currentUser) {
       // Register new user
       const userId = uuidv4();
+      
+      // UPDATE: Added name to INSERT query
       db.run(
-        'INSERT INTO users (id, phone_number) VALUES (?, ?)',
-        [userId, phoneNumber],
+        'INSERT INTO users (id, phone_number, name) VALUES (?, ?, ?)',
+        [userId, phoneNumber, pendingName || null],
         function(insertErr) {
           if (insertErr) {
             return res.status(500).json({ error: 'Failed to register user' });
           }
-          currentUser = { id: userId, phone_number: phoneNumber };
+          // UPDATE: Added name to the currentUser object
+          currentUser = { id: userId, phone_number: phoneNumber, name: pendingName };
           sendAuthResponse(res, currentUser, 'Account created successfully! Please link a bank account.');
         }
       );
@@ -261,23 +267,25 @@ app.post('/auth/verify-otp', otpLimiter, (req, res) => {
   });
 });
 
+
 function sendAuthResponse(res, user, message) {
+  // UPDATE: Added name to the JWT token payload
   const token = sign(
-    { id: user.id, phone_number: user.phone_number },
+    { id: user.id, phone_number: user.phone_number, name: user.name },
     JWT_SECRET,
     { expiresIn: '24h' }
   );
 
-  // Fetch linked bank accounts for the user
-  db.all('SELECT id, bank_name, account_number, ifsc_code, branch, balance FROM bank_accounts WHERE user_id = ?', [user.id], (err, bankAccounts) => {
+  // UPDATE: Added 'is_primary' to SELECT and ordered by it
+  db.all('SELECT id, bank_name, account_number, ifsc_code, branch, balance, is_primary FROM bank_accounts WHERE user_id = ? ORDER BY is_primary DESC', [user.id], (err, bankAccounts) => {
     if (err) {
       console.error('Error fetching bank accounts for user:', err);
-      // Still send token and user, but with empty bank accounts
       return res.json({
         token,
         user: {
           id: user.id,
           phone_number: user.phone_number,
+          name: user.name, // UPDATE: Included here
           bankAccounts: [],
         },
         message
@@ -289,6 +297,7 @@ function sendAuthResponse(res, user, message) {
       user: {
         id: user.id,
         phone_number: user.phone_number,
+        name: user.name, // UPDATE: Included here
         bankAccounts: bankAccounts || [],
       },
       message
@@ -298,9 +307,13 @@ function sendAuthResponse(res, user, message) {
 
 // --- Protected Account & Bank Account Endpoints ---
 
+// --- Protected Account & Bank Account Endpoints ---
+
 app.get('/account/details', authenticateToken, (req, res) => {
   const userId = req.user.id;
-  db.get('SELECT id, phone_number FROM users WHERE id = ?', [userId], (err, user) => {
+  
+  // UPDATE: Added 'name' to the SELECT query
+  db.get('SELECT id, phone_number, name FROM users WHERE id = ?', [userId], (err, user) => {
     if (err) {
       return res.status(500).json({ error: 'Database error' });
     }
@@ -308,7 +321,8 @@ app.get('/account/details', authenticateToken, (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    db.all('SELECT id, bank_name, account_number, ifsc_code, branch, balance FROM bank_accounts WHERE user_id = ?', [userId], (err, bankAccounts) => {
+    // UPDATE: Added 'is_primary' to SELECT and ordered by it
+    db.all('SELECT id, bank_name, account_number, ifsc_code, branch, balance, is_primary FROM bank_accounts WHERE user_id = ? ORDER BY is_primary DESC', [userId], (err, bankAccounts) => {
       if (err) {
         console.error('Error fetching bank accounts for user:', err);
         return res.status(500).json({ error: 'Database error' });
@@ -316,6 +330,7 @@ app.get('/account/details', authenticateToken, (req, res) => {
       res.json({
         id: user.id,
         phone_number: user.phone_number,
+        name: user.name, // UPDATE: Included here
         bankAccounts: bankAccounts || [],
       });
     });
@@ -370,6 +385,52 @@ app.get('/bank-accounts', authenticateToken, (req, res) => {
     }
     res.json(bankAccounts || []);
   });
+});
+
+app.post('/api/bank-accounts/set-primary', authenticateToken, async (req, res) => {
+  const { accountId, pin } = req.body;
+  const userId = req.user.id; // From your JWT auth middleware
+
+  try {
+    // 1. Fetch the specific bank account to verify the PIN
+    const account = await db.query(
+      'SELECT * FROM bank_accounts WHERE id = $1 AND user_id = $2', 
+      [accountId, userId]
+    );
+
+    if (account.rows.length === 0) {
+      return res.status(404).json({ error: 'Bank account not found' });
+    }
+
+    // 2. Verify the PIN (Assuming you stored it securely, adjust comparison as needed)
+    // If you hashed the PIN, use bcrypt.compare here. 
+    if (account.rows[0].pin !== pin) {
+      return res.status(401).json({ error: 'Incorrect 4-digit PIN' });
+    }
+
+    // 3. Begin Transaction to swap primary status
+    await db.query('BEGIN');
+    
+    // Set all user accounts to NOT primary
+    await db.query(
+      'UPDATE bank_accounts SET is_primary = false WHERE user_id = $1', 
+      [userId]
+    );
+    
+    // Set the selected account TO primary
+    await db.query(
+      'UPDATE bank_accounts SET is_primary = true WHERE id = $1 AND user_id = $2', 
+      [accountId, userId]
+    );
+
+    await db.query('COMMIT');
+    res.json({ message: 'Primary account updated successfully' });
+
+  } catch (error) {
+    await db.query('ROLLBACK');
+    console.error('Error setting primary account:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
 app.post('/bank-accounts/lookup', authenticateToken, (req, res) => {

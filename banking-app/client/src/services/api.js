@@ -3,7 +3,6 @@ import { localDB } from './database';
 
 const API_BASE_URL = 'https://payx-kaqu.onrender.com';
 
-
 class ApiService {
   api;
   isOnline = navigator.onLine;
@@ -105,9 +104,9 @@ class ApiService {
     localDB.clearSyncQueue().catch(err => console.error('Failed to clear sync queue on logout:', err));
   }
 
-  async requestOtp(phoneNumber) {
+  async requestOtp(phoneNumber, name = null) {
     try {
-      const response = await this.api.post('/auth/request-otp', { phoneNumber });
+      const response = await this.api.post('/auth/request-otp', { phoneNumber, name});
       return response.data;
     } catch (error) {
       throw new Error(error.response?.data?.error || 'Failed to request OTP');
@@ -177,6 +176,19 @@ class ApiService {
       throw new Error(error.response?.data?.error || 'Recipient lookup failed');
     }
   }
+
+  // --- NEW METHOD ADDED: Set Primary Account with PIN Verification ---
+  async setPrimaryAccount(accountId, pin) {
+    try {
+      const response = await this.api.post('/api/bank-accounts/set-primary', { accountId, pin });
+      // After successfully setting primary status, sync the new account order locally
+      await this.getAccountDetails();
+      return response.data;
+    } catch (error) {
+      throw new Error(error.response?.data?.error || 'Failed to update primary account');
+    }
+  }
+  // -------------------------------------------------------------------
 
   async createTransaction(transactionData, fromBankAccountId, senderPin) {
     const transactionId = `tx_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -333,5 +345,5 @@ class ApiService {
     }
   }
 }
-export const apiService = new ApiService();
 
+export const apiService = new ApiService();
