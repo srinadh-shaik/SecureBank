@@ -24,7 +24,7 @@ export default function PhoneMockup() {
         {!isPaid ? (
           <div className="flex-grow flex flex-col items-center pt-8 px-6 relative animate-fade-in">
             <div className="w-16 h-16 bg-gradient-to-tr from-indigo-600 to-violet-600 rounded-full flex items-center justify-center text-white text-xl font-bold shadow-md mb-4">
-              R
+              S
             </div>
             <h3 className="text-slate-900 font-bold text-lg">Paying Shraddha</h3>
             <p className="text-slate-500 text-xs mb-8">+91 97xxx xxxxx</p>
