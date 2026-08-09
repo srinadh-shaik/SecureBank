@@ -100,7 +100,7 @@ export const AuthProvider = ({ children }) => {
         setUser(updatedUser);
         console.log('AuthContext: User state updated with new bank account data');
       } catch (error) {
-        console.error('Failed to update user bank accounts:', error);
+        console.error('Failed to update user bank accounts due to:', error);
       }
     }
   };
